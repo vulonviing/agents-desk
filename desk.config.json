@@ -1,0 +1,54 @@
+{
+  "roots": ["~/Documents"],
+  "exclude": ["agents-desk"],
+  "port": 4317,
+  "dust": { "light": 14, "medium": 45, "heavy": 120 },
+  "lamp": { "activeDays": 1, "weekDays": 7 },
+  "defaultFloor": "products",
+  "floors": [
+    { "id": "products", "name": "Ürünler" },
+    { "id": "research", "name": "Araştırma" },
+    { "id": "growth", "name": "Kişisel Gelişim" }
+  ],
+  "assignments": {
+    "Agents Extension": "products",
+    "agents-deck": "products",
+    "agents-deck-public": "products",
+    "mahur": "products",
+    "open-volume-booster": "products",
+    "emrecan-vps": "products",
+    "sources-check": "products",
+    "Mini Finance Dashboard": "products",
+    "TeamSquadpy": "products",
+    "Siemens Thesis": "research",
+    "epoch": "research",
+    "ccu": "research",
+    "community-notes-x-rescue-main": "research",
+    "cross-constituency-aggregation-community-notes": "research",
+    "media-bias-pipeline": "research",
+    "paperhub": "research",
+    "science-slam-com-notes": "research",
+    "seds science slam": "research",
+    "Statistical Learning Project 2026": "research",
+    "nazmi-tez-asistani": "research",
+    "Portfolio": "growth",
+    "interview-assistant": "growth",
+    "cv-checker": "growth"
+  },
+  "rooms": [
+    {
+      "id": "emrecan-cv",
+      "name": "Emrecan CV",
+      "floor": "growth",
+      "repo": "Emrecan CV",
+      "subsystems": [
+        { "name": "base", "path": "base" },
+        { "name": "linkedin_collector", "path": "linkedin_collector" },
+        { "name": "application_preparer", "path": "application_preparer" },
+        { "name": "phd_collector", "path": "phd_collector" },
+        { "name": "jobbot", "path": "jobbot" }
+      ],
+      "repos": ["DIL Application"]
+    }
+  ]
+}
