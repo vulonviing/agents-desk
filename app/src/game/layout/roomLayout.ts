@@ -156,11 +156,11 @@ function compactRoom(room: Pick<Room, 'id' | 'stations'>): RoomLayout {
     return { station, tx, ty, seat: { x: tx + 1, y: ty }, access: { x: tx + 1, y: ty - 1 } };
   });
   const coordinatorDesks = [{ tx: 18, ty: 4, access: { x: 19, y: 3 } }];
-  const props: RoomProp[] = [{type:'coffee',tx:18,ty:0,w:2,h:2},{type:'cooler',tx:24,ty:9,w:1,h:1},{type:'sofa',tx:20,ty:tilesH-2,w:3,h:1},{type:'plant',tx:24,ty:tilesH-2,w:1,h:1},{type:'table',tx:21,ty:4,w:3,h:3},...(design.theme==='checker'?[{type:'table' as const,tx:10,ty:8,w:3,h:3}]:[])];
+  const props: RoomProp[] = [{type:'coffee',tx:18,ty:0,w:2,h:2},{type:'cooler',tx:24,ty:9,w:1,h:1},{type:'sofa',tx:20,ty:tilesH-2,w:3,h:1},{type:'plant',tx:24,ty:tilesH-2,w:1,h:1},{type:'table',tx:21,ty:4,w:3,h:3},...(['checker','interview','portfolio'].includes(design.theme)?[{type:'table' as const,tx:10,ty:8,w:3,h:3}]:[])];
   const spots: Spot[] = [{id:'coffee',kind:'coffee',x:18,y:3},{id:'cooler',kind:'cooler',x:23,y:9},{id:'window',kind:'window',x:17,y:3},{id:'sofa',kind:'sofa',x:21,y:tilesH-3}];
   const grid = Array.from({length:tilesH},(_,y)=>Array.from({length:tilesW},(_,x)=>y>=NORTH && y<tilesH-1 && x>0 && x<tilesW-1));
   for (const s of [...stations,...coordinatorDesks]) for(let y=s.ty;y<s.ty+DESK_H;y++)for(let x=s.tx;x<s.tx+DESK_W;x++)grid[y]![x]=false;
   for(const p of props)if(p.type!=='coffee')for(let y=p.ty;y<p.ty+p.h;y++)for(let x=p.tx;x<p.tx+p.w;x++)grid[y]![x]=false;
-  const departments: DepartmentZone[] = [{id:'shared',name:design.theme==='checker'?design.departments[0]!.name:'Ortak çalışma odası',purpose:'Koordinasyon ve uzmanlar aynı çalışma alanında.',dress:design.departments[0]!.dress,step:'',stations:room.stations,color:design.accent,floor:design.departments[0]!.floor,x:1,y:0,w:tilesW-2,h:tilesH-1,doorX:2,doorY:tilesH-1}];
+  const departments: DepartmentZone[] = [{id:'shared',name:['checker','interview','portfolio'].includes(design.theme)?design.departments[0]!.name:'Ortak çalışma odası',purpose:'Koordinasyon ve uzmanlar aynı çalışma alanında.',dress:design.departments[0]!.dress,step:'',stations:room.stations,color:design.accent,floor:design.departments[0]!.floor,x:1,y:0,w:tilesW-2,h:tilesH-1,doorX:2,doorY:tilesH-1}];
   return {tilesW,tilesH,cols:3,rows,xs:18,stations,props,spots,grid,departments,partitions:Array.from({length:tilesH},()=>Array(tilesW).fill(false)),door:{x:16,w:2},theme:design.theme,openPlan:true,hallY:tilesH-4,coordinatorDesks};
 }

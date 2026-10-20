@@ -61,9 +61,9 @@ export function runRouter(room, text, { timeoutMs = 180_000 } = {}) {
 }
 
 // A manager's decision: picks one id from a list. No tools at all.
-export function runChoice(systemPrompt, text, schema, { cwd, timeoutMs = 120_000 } = {}) {
+export function runChoice(systemPrompt, text, schema, { cwd, timeoutMs = 120_000, model } = {}) {
   return new Promise((resolve, reject) => {
-    const args = ['-p', '--output-format', 'json', '--json-schema', JSON.stringify(schema), '--restricted', '--tools', '', '--permission-prompts', 'none', '--no-session-persistence', '--strict-mcp-config', '--append-system-prompt', systemPrompt];
+    const args = ['-p', '--output-format', 'json', '--json-schema', JSON.stringify(schema), '--restricted', '--tools', '', '--permission-prompts', 'none', '--no-session-persistence', '--strict-mcp-config', ...(model ? ['--model', model] : []), '--append-system-prompt', systemPrompt];
     const child = spawnClaude(args, { cwd });
     let out = '';
     let err = '';

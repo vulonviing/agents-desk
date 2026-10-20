@@ -186,6 +186,18 @@ describe('office interiors (kat → ofis → oda)', () => {
     expect(l.departments[0]!.dress).toBe('checker');
     expect(l.departments[0]!.name).toMatch(/kontrol/i);
   });
+  it('the other personal-growth offices have their own rooms and dresses', () => {
+    const mk = (id: string, n: number) => ({ ...cv, id, stations: cv.stations.slice(0, n) }) as Room;
+    const interview = layoutRoom(mk('interview-assistant', 3));
+    const portfolio = layoutRoom(mk('portfolio', 2));
+    expect(interview.departments[0]!.dress).toBe('interview');
+    expect(interview.departments[0]!.name).toMatch(/mülakat/i);
+    expect(portfolio.departments[0]!.dress).toBe('portfolio');
+    expect(portfolio.departments[0]!.name).toMatch(/web/i);
+    // three one-room offices of the floor never share a room floor material
+    const floors = ['cv-checker', 'interview-assistant', 'portfolio'].map((id) => dressOf(layoutRoom(mk(id, 3)).departments[0]!.dress)!.floor);
+    expect(new Set(floors).size).toBe(3);
+  });
   it('every dress uses real atlas frames and a valid floor material', () => {
     for (const [key, dress] of Object.entries(DRESSES)) {
       for (const f of [...dress.back, ...dress.corners.map((c) => c.frame)]) expect(atlas.frames, `${key}:${f}`).toHaveProperty(f);

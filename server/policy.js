@@ -21,9 +21,13 @@ const DENIED_COMMANDS = new Set([
   'env', 'nohup', 'command', 'builtin', 'xargs', 'timeout', 'busybox', 'nice', 'time', 'stdbuf', 'watch', 'setsid', 'script', 'expect', 'parallel',
 ]);
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh']);
+// Interpreters may run project scripts (the user approves each command), but never inline code that hides what runs.
+const INLINE_CODE = /\b(?:python[\d.]*|py|node|nodejs|deno|bun|perl|ruby|php|lua|osascript|awk|gawk)\b[^\n;|&]*\s(?:-c|-e|-E|-p|-r|--eval|--print|--exec)\b/;
+const SECRET_IN_COMMAND = /(^|[\s\/='"<>])\.env(?!\.(?:example|sample|template)\b)(?:\.[\w.-]+)?(?=$|[\s'"<>;|&])|id_(?:rsa|ed25519|ecdsa)|\.(?:pem|p12|pfx)\b|[\/\s]\.(?:ssh|aws|gnupg)\b|\.netrc|\.npmrc/i;
 
 const SECRET_NAME = /^\.env(\..*)?$|^id_(rsa|ed25519|ecdsa)(\.pub)?$|\.(pem|key|p12|pfx)$|^credentials(\.json)?$|^\.netrc$|^\.npmrc$/i;
 
+const SECRET_SELECTOR = /(^|[\/*{,\s])\.env(?!\.(?:example|sample|template)\b)|\bid_(?:rsa|ed25519|ecdsa)|\.(?:pem|p12|pfx)\b|\.(?:ssh|aws|gnupg|git)(?:[\/*{},\s]|$)|\.netrc|\.npmrc|\bcredentials/i;
 const PROTECTED_DIRS = new Set(['.git', '.ssh', '.aws', '.gnupg']);
 const hasProtectedDir = (p) => String(p).split(/[\\/]+/).some((seg) => PROTECTED_DIRS.has(seg.toLowerCase()));
 
@@ -47,7 +51,12 @@ const inside = (path, roots) => {
 export function commandWords(command) {
   return String(command)
     .split(/&&|\|\||[;|&\n]/)
-    .map((seg) => seg.trim().replace(/^(?:\w+=\S*\s+)+/, '').split(/\s+/)[0])
+    .map((seg) => {
+      let t = seg.trim();
+      // grouping, negation and compound keywords do not change which command runs: ( cmd ), { cmd; }, ! cmd, then cmd, while cmd
+      for (let i = 0; i < 6; i++) t = t.replace(/^(?:[({!]+\s*|(?:if|then|else|elif|do|while|until|case|for|select|time|coproc)\b\s*)/, '').replace(/^(?:\w+=\S*\s+)+/, '');
+      return t.split(/\s+/)[0];
+    })
     .filter(Boolean)
     .map((w) => basename(w));
 }
@@ -74,8 +83,11 @@ function dangerousPlain(text) {
   if (/>\s*\/(?:etc|usr|bin|sbin|System|Library|var|opt)\b/.test(text)) return 'sistem klasörlerine yazılamaz';
   for (const w of commandWords(text)) {
     if (DENIED_COMMANDS.has(w)) return `"${w}" ofisten çalıştırılamaz`;
-    if (SHELLS.has(w) && /\s-[a-z]*c\b/.test(text)) return 'kabuk içinde komut (sh -c) kullanılamaz';
+    if (SHELLS.has(w)) return 'kabuk çalıştırılamaz (sh, bash …)';
+    if (w === 'source' || w === '.') return 'source / . ile betik yüklenemez';
   }
+  if (INLINE_CODE.test(text)) return 'satır içi kod (python -c, node -e …) çalıştırılamaz';
+  if (SECRET_IN_COMMAND.test(text)) return 'gizli bilgi dosyalarına komutla erişilemez';
   if (/\brm\b[^\n;|&]*\s(?:-[a-z]*[rf]|--recursive|--force|--no-preserve-root)/i.test(text)) return 'rm -r / rm -f kullanılamaz';
   if (/\bfind\b[^\n;|&]*\s-(?:exec|execdir|ok|delete)\b/.test(text)) return 'find -exec / -delete kullanılamaz';
   // git: skip global options (-C dir, -c k=v, --git-dir=…) before the subcommand
@@ -99,6 +111,10 @@ export function decide(ctx, tool, input = {}) {
   if (level === 'plan') return deny('Bu odanın seviyesi "plan": ofisten hiçbir şey çalıştırılmaz.');
 
   if (SAFE_TOOLS.has(tool)) {
+    // Grep/Glob can reach secrets through their selectors, not only through `path`
+    for (const sel of [input.glob, input.pattern, input.include, input.type]) {
+      if (typeof sel === 'string' && (tool === 'Glob' || tool === 'Grep') && SECRET_SELECTOR.test(sel)) return deny('Gizli bilgi dosyaları aranamaz (.env, anahtarlar, .ssh, .git).', `${tool}: ${clip(sel, 80)}`);
+    }
     if (typeof path === 'string') {
       if (isSecretPath(path) || isSecretPath(realTarget(path))) return deny('Gizli bilgi dosyaları okunamaz (.env, anahtarlar, .git, .ssh).', `${tool}: ${basename(path)}`);
       if (!inside(path, roots)) return deny('Proje klasörünün dışına erişilemez.', `${tool}: ${clip(path, 120)}`);

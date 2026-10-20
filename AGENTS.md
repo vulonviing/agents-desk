@@ -26,7 +26,7 @@ name the skills it must use in the prompt.
 
 | Trigger | Skill (then) |
 |---|---|
-| Decorating floors: corridor/connector dressing, floor concepts, palettes, materials, wall art, set pieces, new theme sprites | `floor-interior-design` → `visual-qa` |
+| Decorating any level — floor, office or room: concepts, palettes, materials, wall art, set pieces, room dresses, new decoration sprites | `floor-interior-design` → `visual-qa` |
 | ANY floor-plan, building or office-arrangement change: circulation, access, adjacency, proportions (read first) | `architectural-planning` |
 | Floor plan (central corridor),  entrance/lobby, elevator, floor navigation, Master's office shell, kat → ofis → oda signage | `building-shell` → `visual-qa` |
 | Inside an office: size, type, desk pods/pitch, departments, walls, doors, walkways, where furniture goes | `office-layout-design` (+ `office-art-direction` for looks) → `visual-qa` |
@@ -40,6 +40,7 @@ name the skills it must use in the prompt.
 | Sprites, atlas, `gen-assets`, palette/size rules, licences and credits | `pixel-asset-pipeline` |
 | Tiled JSON, layers, collision, depth, GIDs, map tests | `tiled-map-pipeline` |
 | Day/night, ambient props, rare events, effects | `office-atmosphere` → `visual-qa` |
+| Ambient talk (coffee, news, visits), dialogue pool, Haiku refill, token budget | `office-dialogues` → `visual-qa` |
 | React UI: HUD, toolbar, dock, chat rendering, tooltips, mobile, accessibility | `office-ui-hud` → `visual-qa` |
 
 **Hard rule:** any visual or game change (layout, sprites, furniture, characters, signs, HUD,
@@ -140,6 +141,8 @@ Append every completed chat-session step to `ai_usage/steps_logs.md`.
 ## Office life and observation
 
 - Ambient walking, breaks, and social bubbles continue while projects are inactive; they never imply real CLI work.
+  Ambient lines come from a per-office dialogue pool refilled rarely by Haiku (`server/dialogues.js`, `office-dialogues` skill);
+  never call a model per spoken line and never feed chat, prompt or transcript text into the pool.
 - Green character diamonds represent observed CLI activity or Desk runs, not ambient motion or historical station hits.
 - `scanner/watch.js` watches Claude/Codex session roots and project `.agents`/`.claude` skill roots.
   Native notifications trigger debounced snapshots; no periodic transcript scan is allowed.

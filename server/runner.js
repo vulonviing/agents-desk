@@ -14,7 +14,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const BRIDGE = join(HERE, 'approve-mcp.js');
 const MAX_LOG = 300;
 // Secret files stay unreadable even if the bridge were bypassed; the bridge (server/policy.js) decides every tool call, reads included.
-const SECRET_READS = ['Read(**/.env*)', 'Read(.env*)', 'Read(**/*.pem)', 'Read(**/*.key)', 'Read(**/id_rsa*)', 'Read(**/id_ed25519*)', 'Read(**/.netrc)', 'Read(**/.npmrc)', 'Read(**/credentials*)', 'Read(**/.ssh/**)', 'Read(**/.aws/**)', 'Read(**/.git/**)'];
+const SECRET_READS = ['Read(**/.env*)', 'Read(.env*)', 'Read(**/*.pem)', 'Read(**/*.key)', 'Read(**/id_rsa*)', 'Read(**/id_ed25519*)', 'Read(**/.netrc)', 'Read(**/.npmrc)', 'Read(**/credentials*)', 'Read(**/.ssh/**)', 'Read(**/.aws/**)', 'Read(**/.git/**)', 'Grep(**/.env*)', 'Glob(**/.env*)', 'Grep(**/.ssh/**)', 'Grep(**/.aws/**)'];
 
 const clip = (s, n) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();

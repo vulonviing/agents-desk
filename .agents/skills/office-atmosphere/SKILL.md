@@ -7,6 +7,10 @@ description: Use when adding life to the Agents Desk office beyond direct task s
 
 Goal: the office feels alive without lying and without noise. Atmosphere never contradicts or hides real agent state.
 
+## Implemented
+- **Windows follow the real clock** (`window_day`, `window_dusk`, `window_night`, generated in `gen-decor.mjs`): 07–17 day, 17–20 and 06 dusk, otherwise night. `OfficeScene.updateSky()` swaps the frame of every `lz_window*` sprite (checked once per frame, changes only at phase boundaries).
+- Ambient talk: see `office-dialogues` (pool + small model, never per-line generation).
+
 ## Allowed
 - **Day/night** from the real clock: window sprites switch sky frame (day / dusk / night); optional warm light overlay on desks at night. No whole-room darkening.
 - **Ambient props**: wall clock showing real time (analog frame set), plants swaying (2 frames), blinking server LEDs, steam from coffee, dust motes in dormant offices.

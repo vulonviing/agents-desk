@@ -26,6 +26,10 @@ export const DRESSES: Record<string, Dress> = {
   archive: { floor: 'mat:sage', wall: 7, back: ['lz_shelf_books_a', 'diploma', 'lz_shelf_books_b'], corners: [{ frame: 'archive_cabinets', at: 'bl', dx: 20 }, { frame: 'scanner', at: 'br' }] },
   // cv-checker: a review laboratory
   checker: { floor: 'mat:blue', wall: 2, back: ['resume_wall', 'score_board', 'checklist_board'], openBack: [160, 196, 230], corners: [{ frame: 'scanner', at: 'bl', dx: 40 }, { frame: 'magnifier_stand', at: 'br', dx: -4 }, { frame: 'scanner', at: 'abs', dx: 184, dy: 150 }, { frame: 'magnifier_stand', at: 'abs', dx: 160, dy: 164 }, { frame: 'letter_stack', at: 'abs', dx: 206, dy: 156 }] },
+  // interview-assistant: a rehearsal room
+  interview: { floor: 'mat:sand', wall: 3, back: ['cue_cards', 'timer_clock', 'poster_sun'], openBack: [160, 196, 232], corners: [{ frame: 'mic_stand', at: 'bl', dx: 40 }, { frame: 'ring_light', at: 'br', dx: -4 }, { frame: 'interview_table', at: 'abs', dx: 186, dy: 168 }] },
+  // portfolio: a web studio
+  portfolio: { floor: 'mat:lilac', wall: 1, back: ['site_mockup', 'swatch_board', 'sticky_wall'], openBack: [160, 196, 232], corners: [{ frame: 'sketch_desk', at: 'abs', dx: 186, dy: 168 }, { frame: 'lz_plant_a', at: 'bl', dx: 40 }] },
 };
 
 export const dressOf = (key: string): Dress | undefined => DRESSES[key];

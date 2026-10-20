@@ -19,6 +19,16 @@ async function readStdin() {
   return s;
 }
 
+if (args.includes('--json-schema') && String(flag('--json-schema')).includes('"lines"')) {
+  // dialogue pool refill (small model): returns lines from DESK_FAKE_LINES (JSON file) or a default sample
+  const stdin = await readStdin();
+  log({ mode: 'dialogue', stdin, model: flag('--model') });
+  if (process.env.DESK_FAKE_FAIL) { out({ type: 'result', is_error: true, result: 'boom' }); process.exit(0); }
+  const lines = process.env.DESK_FAKE_LINES ? JSON.parse(readFileSync(process.env.DESK_FAKE_LINES, 'utf8')) : [{ kind: 'coffee', text: 'Fake kahve molası.' }, { kind: 'visit', text: '{other}, selam!', reply: 'Selam {name}.' }];
+  out({ type: 'result', is_error: false, result: JSON.stringify({ lines }), structured_output: { lines } });
+  process.exit(0);
+}
+
 if (args.includes('--json-schema') && String(flag('--json-schema')).includes('"target"')) {
   // manager choice: pick the first id of DESK_FAKE_PICK (comma list) that the prompt offers
   const stdin = await readStdin();

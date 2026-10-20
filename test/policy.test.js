@@ -108,3 +108,16 @@ test('paths: symlinks that leave the project, .git/.ssh/.aws folders and case va
   assert.equal(decide(c, 'Read', { file_path: join(proj, '.ssh', 'id') }).behavior, 'deny');
   assert.equal(decide(c, 'Read', { file_path: join(proj, 'README.md') }).behavior, 'allow');
 });
+
+test('review round 2: grouping/keywords, interpreters with inline code, shells, source, secrets in commands and Grep/Glob selectors', () => {
+  for (const c of ['(ssh host)', '{ ssh host; }', '! ssh host', 'if true; then ssh host; fi', 'while true; do sudo ls; done', 'bash script.sh', 'sh', 'source ./x.sh', '. ./x.sh', "python3 -c 'import os'", 'node -e "x"', 'perl -e 1', 'ruby -e 1', 'php -r 1', 'cat .env', 'cat config/.env.local', 'cat ~/.ssh/id_rsa', 'cp key.pem /tmp', 'grep x ~/.aws/credentials']) {
+    assert.ok(dangerousCommand(c), c);
+  }
+  for (const c of ['python3 tools/build_cv.py "applications/x/CV.json"', 'node scanner/scan.js', 'cat .env.example', 'ls -la', 'make build']) assert.equal(dangerousCommand(c), null, c);
+  const c = { level: 'read-only', roots: ['/D/proj'] };
+  for (const [tool, input] of [['Glob', { pattern: '**/.env*' }], ['Grep', { pattern: 'KEY', glob: '**/.env*', path: '/D/proj' }], ['Grep', { pattern: 'x', glob: '*.pem' }], ['Glob', { pattern: '.ssh/*' }], ['Grep', { pattern: 'x', path: '/D/proj/.git' }]]) {
+    assert.equal(decide(c, tool, input).behavior, 'deny', `${tool} ${JSON.stringify(input)}`);
+  }
+  assert.equal(decide(c, 'Grep', { pattern: 'TODO', glob: '**/*.md', path: '/D/proj/docs' }).behavior, 'allow');
+  assert.equal(decide(c, 'Glob', { pattern: '**/*.js', path: '/D/proj' }).behavior, 'allow');
+});

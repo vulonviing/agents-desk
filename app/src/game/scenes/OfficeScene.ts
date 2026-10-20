@@ -5,6 +5,7 @@ import { AgentSprite, type Visual } from '../entities/AgentSprite';
 import { emptyState, type GameBridge, type HostState } from '../bridge';
 import { layoutFloor } from '../layout/floorLayout';
 import { themeOf } from '../maps/catalog';
+import { pickLine, type LineKind } from '../../services/dialogues';
 import { layoutRoom, type RoomLayout } from '../layout/roomLayout';
 import { buildFloorMap, type FloorMapResult } from '../maps/floorMap';
 import { buildMasterMap, MASTER_ID } from '../maps/masterMap';
@@ -61,6 +62,9 @@ export class OfficeScene extends Phaser.Scene {
   private masterSpeech: Phaser.GameObjects.Container | null = null;
   private observedIds = new Set<string>();
   private speechKey = '';
+  private nextTalk = new Map<string, number>();
+  private windows: Phaser.GameObjects.Sprite[] = [];
+  private skyPhase = '';
 
   constructor() {
     super('office');
@@ -117,6 +121,9 @@ export class OfficeScene extends Phaser.Scene {
     this.masterSpeech?.destroy(true);
     this.masterSpeech = null;
     this.speechKey = '';
+    this.nextTalk.clear();
+    this.windows = [];
+    this.skyPhase = '';
     for (const a of this.agents.values()) a.destroy();
     this.agents.clear();
     this.workers.clear();
@@ -139,6 +146,14 @@ export class OfficeScene extends Phaser.Scene {
     this.tilemap = null;
     if (this.mapKey) this.cache.tilemap.remove(this.mapKey);
     this.mapKey = '';
+  }
+
+  /** Windows show the real time of day (day / dusk / night) instead of a fixed sky. */
+  private updateSky(hour = new Date().getHours()) {
+    const phase = hour >= 7 && hour < 17 ? 'day' : hour >= 17 && hour < 20 || hour === 6 ? 'dusk' : 'night';
+    if (phase === this.skyPhase) return;
+    this.skyPhase = phase;
+    for (const w of this.windows) w.setFrame(`window_${phase}`);
   }
 
   /** "Elevator ride": a short screen-fixed floor indicator when the user switches floors. */
@@ -211,6 +226,7 @@ export class OfficeScene extends Phaser.Scene {
     for (const o of layer('furniture')) {
       const p = propsOf(o);
       const s = this.add.sprite(o.x, o.y, 'props', String(p.frame)).setOrigin(0.5, 1);
+      if (String(p.frame).startsWith('lz_window')) this.windows.push(s);
       if (p.flipX) s.setFlipX(true);
       s.setDepth(typeof p.depth === 'number' ? p.depth : p.layer === 'floor' ? 0.5 : p.layer === 'wall' ? 1 : o.y);
       if (p.anim === 'butterfly') {
@@ -404,6 +420,7 @@ export class OfficeScene extends Phaser.Scene {
       this.signZoom = zoom;
       for (const sg of this.signs) sg.rescale(zoom);
     }
+    this.updateSky();
     for (const s of this.agents.values()) s.updateSpeech();
     if (this.state.view?.kind === 'floor') { this.animateFloorLife(_time); return; }
     if (this.state.view?.kind !== 'room' || !this.layout) return;
@@ -423,8 +440,30 @@ export class OfficeScene extends Phaser.Scene {
       stepWorker(w, dt, { layout: this.layout, demand: working ? a.deskId : null, sleeping: false, rng: () => this.rand(), weights: this.currentAgents().length > 3 ? CALM_CHOICES : undefined });
       if (w.mode === 'doing' && previousMode !== 'doing') {
         const neighbor = w.doing === 'visit' ? [...this.workers.values()].find(other => other.id !== w.id && other.stationId === w.spotId) : null;
-        s.say(neighbor ? 'Bir kahve molası?' : w.doing === 'visit' ? 'Atölyede kısa bir tur.' : w.doing === 'coffee' ? 'Kahve vakti.' : w.doing === 'window' ? 'Biraz hava alayım.' : 'Kısa bir dinlenme.');
-        if (neighbor && !this.state.agents.find(a => a.id === neighbor.id)?.cliActive) this.agents.get(neighbor.id)?.say('Olur, biraz soluklanalım.');
+        // ambient talk comes from the office's dialogue pool (picked locally, no model call per line)
+        const officeId = this.state.view?.kind === 'room' ? this.state.view.roomId : a.roomId;
+        const nb = neighbor ? this.state.agents.find(x => x.id === neighbor.id) : undefined;
+        if (nb) {
+          const line = pickLine(officeId, 'visit', a.name, nb.name, () => this.rand());
+          if (line) {
+            s.say(line.text);
+            if (line.reply && !nb.cliActive) this.time.delayedCall(1800, () => this.agents.get(nb.id)?.say(line.reply!));
+          }
+        } else {
+          const kind: LineKind = w.doing === 'coffee' ? 'coffee' : w.doing === 'cooler' ? 'water' : w.doing === 'window' ? 'window' : w.doing === 'sofa' ? 'news' : 'desk';
+          const line = pickLine(officeId, kind, a.name, undefined, () => this.rand());
+          if (line) s.say(line.text);
+        }
+      }
+      // now and then a resident at an idle desk thinks aloud (ambient only, never real work)
+      if (w.mode === 'seated' && !working) {
+        const due = this.nextTalk.get(a.id);
+        if (due === undefined) this.nextTalk.set(a.id, this.time.now + 15000 + this.rand() * 30000);
+        else if (this.time.now > due) {
+          const line = pickLine(a.roomId, 'desk', a.name, undefined, () => this.rand());
+          if (line) s.say(line.text);
+          this.nextTalk.set(a.id, this.time.now + 40000 + this.rand() * 50000);
+        }
       }
       if (w.mode === 'walking') {
         moving.push(a.id);
@@ -535,7 +574,7 @@ export class OfficeScene extends Phaser.Scene {
       const along = Math.max(0, progress * 2 - 1);
       s.setFeet(seat.x + (targetX - seat.x) * along, seat.y + (aisleY - seat.y) * corner);
       s.setVisual(progress < 1 ? 'walk' : 'visit', phase > 33 ? 'down' : 'up');
-      if (phase >= 25 && phase < 25.12) s.say(idx % 2 ? 'Bir kahve molası?' : 'Biraz soluklanalım.');
+      if (phase >= 25 && phase < 25.12) { const line = pickLine(a.roomId, idx % 2 ? 'coffee' : 'window', a.name, undefined, () => this.rand()); if (line) s.say(line.text); }
     }
   }
 

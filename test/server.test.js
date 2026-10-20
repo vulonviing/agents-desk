@@ -315,3 +315,22 @@ test('an alternative explanation reconsiders routing from the master with the or
   const entries = (await call('GET',`/api/managers/${encodeURIComponent('manager:master')}/terminal`)).body.entries;
   assert.equal(entries.filter((e) => e.kind==='output' && e.label==='Master Yönetici').length,2);
 });
+
+test('dialogues API: pool per office, validation, refill through the fake small model', async (t) => {
+  const { call } = await api(t);
+  assert.equal((await call('GET', '/api/dialogues?office=../etc')).status, 400);
+  assert.equal((await call('GET', '/api/dialogues?office=nope')).status, 404);
+  const first = await call('GET', '/api/dialogues?office=plan-room');
+  assert.equal(first.status, 200);
+  assert.ok(first.body.lines.length > 5);
+  let second;
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    second = await call('GET', '/api/dialogues?office=plan-room');
+    if (second.body.source === 'haiku') break;
+  }
+  assert.equal(second.body.source, 'haiku');
+  assert.ok(second.body.lines.some((l) => l.text === 'Fake kahve molası.'));
+  const status = await call('GET', '/api/dialogues/status');
+  assert.equal(status.body.usage.calls, 1);
+});

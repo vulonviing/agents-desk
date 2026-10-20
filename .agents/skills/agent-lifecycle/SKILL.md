@@ -40,6 +40,8 @@ Resident rules: `offline` = asleep at desk (zzz, dust level by `dust`); a commit
 - A real assignment picks one stable style: message, phone call or personal visit; message/call recipients look at their phone, abandon the break and return to their desk; visits meet the resident, then release it.
 - File handoff animations need a successful write then a successful read at another station; label bubbles as Desk observations; never invent content or imply agents talk to each other.
 
+- Ambient lines (coffee, water, window, news, visits, desk murmurs) are picked from the office dialogue pool (`office-dialogues`); they are never "observed" speech and never claim work.
+
 ## Design rules
 1. **State comes from the server, movement from the game.** `AgentDTO.status` is truth (`server/agents.js`); `moving` is set client-side while walking. UI shows `moving` only while a path is active.
 2. **One state machine** (`app/src/game/systems/behavior.ts`: seated / walking / doing / sleeping + new `arriving` / `leaving`). Transitions are a table, not scattered `if`s; each transition has a test.

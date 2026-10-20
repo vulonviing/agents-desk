@@ -73,5 +73,13 @@
   },
   "include": [
     "normalcy-axis-project/normalcy-axis"
-  ]
+  ],
+  "dialogues": {
+    "enabled": true,
+    "model": "haiku",
+    "refreshHours": 12,
+    "maxCallsPerDay": 10,
+    "linesPerRefresh": 36,
+    "poolMax": 120
+  }
 }

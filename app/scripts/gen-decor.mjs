@@ -226,4 +226,49 @@ export function registerDecor(add) {
     [[3, '#e8805a'], [11, '#6fb3ff'], [19, '#8aa07a']].forEach(([x, c]) => { im.rect(x, 3, 8, 15, '#ffffff'); im.rect(x, 3, 8, 3, c); im.rect(x + 1, 8, 6, 1, '#a9acbc'); im.rect(x + 1, 10, 5, 1, '#a9acbc'); im.rect(x + 1, 12, 6, 1, '#a9acbc'); im.rect(x + 1, 14, 4, 1, '#a9acbc'); });
     im.rect(27, 5, 3, 3, '#6fd49a'); im.px(28, 6, '#ffffff');
   });
+
+  // ===== interview-assistant: a rehearsal room =====
+  add('cue_cards', 30, 22, (im) => {
+    im.box(0, 0, 30, 22, '#3a2a4a', '#1d1428');
+    [[3, 4, '#f4e8c4', -1], [11, 3, '#fbe8c8', 1], [19, 5, '#f4e8c4', -1], [7, 12, '#fbe8c8', 1], [15, 12, '#f4e8c4', -1]].forEach(([x, y, c, tilt]) => { im.rect(x, y, 8, 6, c); im.rect(x + 1, y + 1, 6, 1, '#8f6a4a'); im.rect(x + 1, y + 3, 4, 1, '#8f6a4a'); im.px(x + 3 + tilt, y - 1, '#e0584f'); });
+  });
+  add('mic_stand', 14, 30, (im) => { im.rect(6, 8, 2, 20, '#3a3a50'); im.rect(2, 28, 10, 2, '#3a3a50'); im.rect(4, 2, 6, 8, '#565972'); im.rect(5, 3, 4, 6, '#a9acbc'); im.rect(5, 4, 4, 1, '#3a3a50'); im.rect(5, 6, 4, 1, '#3a3a50'); });
+  add('ring_light', 18, 34, (im) => {
+    for (let a = 0; a < 24; a++) { const t = (a / 24) * Math.PI * 2; im.rect(8 + Math.cos(t) * 6, 7 + Math.sin(t) * 6, 2, 2, '#fff2a8'); }
+    im.rect(8, 15, 2, 17, '#3a3a50'); im.rect(3, 31, 12, 3, '#3a3a50'); im.rect(7, 6, 4, 4, '#3a3a50');
+  });
+  add('interview_table', 34, 24, (im) => {
+    im.rect(1, 10, 32, 4, '#c8905a'); im.rect(1, 10, 32, 1, '#e0b078'); im.rect(3, 14, 3, 9, '#7a4a2e'); im.rect(28, 14, 3, 9, '#7a4a2e');
+    im.rect(5, 6, 5, 4, '#f8f8f8'); im.rect(6, 5, 3, 1, '#a9acbc'); im.rect(13, 7, 8, 3, '#f4e8c4'); im.rect(24, 5, 5, 5, '#e8805a'); im.rect(25, 4, 3, 1, '#f8f8f8');
+  });
+  add('timer_clock', 20, 20, (im) => { im.box(0, 0, 20, 20, '#f8f8f8', '#3a3a50'); im.rect(9, 3, 2, 8, '#3a3a50'); im.rect(10, 9, 5, 2, '#e0584f'); im.rect(2, 2, 3, 3, '#6fd49a'); im.px(17, 3, '#e0584f'); });
+  // ===== portfolio: a web studio =====
+  add('site_mockup', 34, 24, (im) => {
+    im.box(0, 0, 34, 24, '#f4f6fa', '#3a4a6a'); im.rect(1, 1, 32, 3, '#3a4a6a'); im.px(3, 2, '#e0584f'); im.px(6, 2, '#f0d060'); im.px(9, 2, '#6fd49a');
+    im.rect(3, 6, 28, 7, '#c07cff'); im.rect(5, 8, 12, 1, '#ffffff'); im.rect(5, 10, 8, 1, '#e8d8ff');
+    [[3, '#6fb3ff'], [13, '#f0a060'], [23, '#6fd49a']].forEach(([x, c]) => { im.rect(x, 15, 8, 6, '#e8ecf4'); im.rect(x, 15, 8, 2, c); });
+  });
+  add('swatch_board', 28, 22, (im) => {
+    im.box(0, 0, 28, 22, '#f8f8f8', '#8f85a9');
+    ['#e8805a', '#f0d060', '#8aa07a', '#6fb3ff', '#c07cff', '#3a3a50'].forEach((c, i) => { im.rect(3 + (i % 3) * 8, 3 + Math.floor(i / 3) * 9, 7, 8, c); im.rect(3 + (i % 3) * 8, 9 + Math.floor(i / 3) * 9, 7, 2, '#ffffff66'); });
+  });
+  add('sticky_wall', 32, 22, (im) => {
+    im.box(0, 0, 32, 22, '#5a4a6a', '#2c2438');
+    for (let y = 0; y < 3; y++) for (let x = 0; x < 5; x++) { im.rect(3 + x * 5.6, 3 + y * 6, 5, 5, ['#ffe08a', '#ffb0c8', '#b0e0ff', '#c8f0b0'][(x + y * 2) % 4]); im.rect(4 + x * 5.6, 5 + y * 6, 3, 1, '#8f6a4a'); }
+  });
+  add('sketch_desk', 30, 24, (im) => {
+    im.rect(1, 12, 28, 3, '#c8905a'); im.rect(1, 12, 28, 1, '#e0b078'); im.rect(3, 15, 2, 8, '#7a4a2e'); im.rect(25, 15, 2, 8, '#7a4a2e');
+    im.box(7, 3, 14, 9, '#2a3350'); im.rect(9, 5, 10, 5, '#c07cff'); im.rect(11, 7, 6, 1, '#ffffff'); im.rect(22, 9, 5, 3, '#f8f8f8'); im.rect(3, 10, 3, 2, '#f0d060');
+  });
+
+  // ===== atmosphere: windows that follow the real clock (same 25x20 footprint as the LimeZu windows) =====
+  const win = (name, top, bottom, extra) => add(name, 25, 20, (im) => {
+    im.box(0, 0, 25, 20, '#c8905a', '#6b4a2e');
+    for (let y = 2; y < 18; y++) im.rect(2, y, 21, 1, y < 10 ? top : bottom);
+    extra(im);
+    im.rect(12, 2, 1, 16, '#6b4a2e'); im.rect(2, 9, 21, 1, '#6b4a2e'); im.rect(1, 18, 23, 1, '#e0b078');
+  });
+  win('window_day', '#8cc8f4', '#b8e0f8', (im) => { im.rect(15, 3, 4, 4, '#ffe680'); im.rect(14, 4, 6, 2, '#ffe680'); im.rect(4, 5, 6, 2, '#ffffff'); im.rect(5, 4, 4, 1, '#ffffff'); im.rect(5, 13, 8, 2, '#ffffff'); });
+  win('window_dusk', '#5a4a8c', '#f0a060', (im) => { im.rect(4, 12, 6, 3, '#e0805a'); im.rect(14, 13, 7, 2, '#c8605a'); im.rect(16, 11, 3, 3, '#ffcc66'); im.px(5, 4, '#fff2a8'); });
+  win('window_night', '#141a46', '#262e6a', (im) => { [[5, 4], [9, 6], [16, 4], [19, 8], [6, 12], [18, 13], [21, 5]].forEach(([x, y]) => im.px(x, y, '#fff2a8')); im.rect(15, 11, 4, 4, '#f4ecd0'); im.rect(16, 11, 3, 3, '#141a46'); im.rect(17, 12, 2, 2, '#262e6a'); });
 }

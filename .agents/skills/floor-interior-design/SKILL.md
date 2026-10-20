@@ -1,9 +1,11 @@
 ---
 name: floor-interior-design
-description: Use when dressing a floor of the Agents Desk building: corridor and connector decoration, each floor's concept, colour palette, materials (floor tiles, runners, wall colours), wall art, set pieces ("vignettes"), signature props, lobby/elevator/stairs dressing, and when adding a new floor theme or new decoration sprites. Creative direction, not circulation (architectural-planning) or office interiors (office-layout-design).
+description: Use when decorating ANY level of the Agents Desk building — floor (kat), office (ofis) or room (oda): corridors and connector, each level's concept, colour palette, materials (floor tiles, carpets, runners, wall colours), wall art, set pieces, signature props, room dresses, and when adding a new theme, dress or decoration sprites. Creative direction (the look and story), not circulation (architectural-planning) or room geometry (office-layout-design).
 ---
 
-# Floor interior design (decoration with a concept)
+# Interior design for floors, offices and rooms (decoration with a concept)
+
+The same method applies at all three levels: **concept → palette → material → art → set pieces**. Floors use `FLOOR_THEMES`; offices and rooms use `officeDesign.ts` + room dresses (`maps/roomDress.ts`).
 
 Goal: walking from one floor to another must feel like entering a different place with its own spirit — in one glance and without reading a sign.
 Architecture (`architectural-planning`) decides where things go; this skill decides **what the place feels like**. Never trade circulation for decoration.
