@@ -3,10 +3,11 @@ import { execFileSync } from 'node:child_process';
 // Read-only git access. --no-optional-locks keeps `status` from refreshing the index.
 function git(repo, args) {
   try {
-    return execFileSync('git', ['--no-optional-locks', '-C', repo, ...args], {
+    // Repo-local config is untrusted input: disable fsmonitor (it can run a hook) and the pager.
+    return execFileSync('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.pager=cat', '-C', repo, ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' },
       timeout: 20000,
     }).trim();
   } catch {
@@ -30,7 +31,7 @@ export function gitInfo(repo, subpath) {
   const aheadRaw = git(repo, ['rev-list', '--count', '@{u}..HEAD']);
   return {
     lastCommit,
-    branch: git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']),
+    branch: git(repo, ['branch', '--show-current']) || null,
     dirty: countLines(git(repo, ['status', '--porcelain', ...scope])),
     ahead: aheadRaw === null ? null : Number(aheadRaw),
     remote: git(repo, ['remote', 'get-url', 'origin']),

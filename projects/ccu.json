@@ -1,0 +1,10 @@
+{
+  "slug": "ccu",
+  "level": "plan",
+  "notes": "Jupyter istemcisi; RULES.md ve SECURITY.md geçerli. Token sızıntı denetimi çalıştırılabilir.",
+  "stations": [
+    { "id": "dogrulama", "name": "Doğrulama", "description": "validate.sh ve token sızıntı denetimi.", "scripts": ["validate.sh", "check_token_leaks.py"], "risk": "readonly" },
+    { "id": "kurulum", "name": "Yerel kurulum", "description": "install-local.sh ile yerel kurulum.", "scripts": ["install-local.sh"], "risk": "effect" },
+    { "id": "belgeler", "name": "Belgeler", "description": "ARCHITECTURE, RULES, SECURITY, TROUBLESHOOTING ve docs/.", "paths": ["ARCHITECTURE.md", "RULES.md", "SECURITY.md", "TROUBLESHOOTING.md", "docs/"], "risk": "readonly" }
+  ]
+}

@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdirSync, readlinkSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readlinkSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { gitInfo } from '../scanner/git.js';
-import { scan, slugify } from '../scanner/scan.js';
+import { levelFor, scan, slugify } from '../scanner/scan.js';
 import { linkWorkspace } from '../scripts/link-workspace.js';
 import { git, makeRepo, tmp, write } from './helpers.js';
 
@@ -18,8 +18,10 @@ function fixtureRoot() {
     ['sub2/b.txt', '2026-06-20T10:00:00Z'],
     ['README.md', '2026-06-20T10:00:00Z'],
   ]);
+  makeRepo(join(root, 'Side Repo'), [['s.txt', '2026-06-10T10:00:00Z']]);
   write(join(root, 'Big Repo'), 'AGENTS.md', '## Trigger commands\n- **"go"** → run\n');
   write(join(root, 'Big Repo'), '.agents/skills/x/SKILL.md', '---\nname: x\ndescription: d\n---\n');
+  write(join(root, 'Side Repo'), '.agents/skills/side/SKILL.md', '---\nname: side\ndescription: s\n---\n');
   mkdirSync(join(root, 'plain-folder'));
   mkdirSync(join(root, 'agents-desk'));
   return root;
@@ -32,9 +34,17 @@ const config = (root) => ({
   lamp: { activeDays: 1, weekDays: 7 },
   defaultFloor: 'products',
   floors: [{ id: 'products', name: 'P' }, { id: 'research', name: 'R' }],
-  assignments: { 'Old Project': 'research' },
-  rooms: [{ id: 'big', name: 'Big', floor: 'research', repo: 'Big Repo', subsystems: [{ name: 'sub1', path: 'sub1' }, { name: 'sub2', path: 'sub2' }], repos: [] }],
+  assignments: { 'Old Project': 'research', 'Big Repo': 'research' },
+  embed: { 'Big Repo': ['Side Repo'] },
+  levels: { default: 'plan', fresh: 'approve' },
 });
+
+function manifestDir() {
+  const dir = tmp();
+  write(dir, 'big-repo.json', JSON.stringify({ level: 'read-only', notes: 'n', stations: [{ id: 'sub1', name: 'Sub 1', paths: ['sub1/'], risk: 'readonly' }] }));
+  write(dir, 'old-project.json', '{ broken');
+  return dir;
+}
 
 test('gitInfo: scoped commit date, dirty count, no upstream', () => {
   const root = fixtureRoot();
@@ -47,25 +57,52 @@ test('gitInfo: scoped commit date, dirty count, no upstream', () => {
   assert.equal(gitInfo(repo).ahead, null);
 });
 
-test('scan: floors, rooms, excludes, dust and lamps', () => {
-  const root = fixtureRoot();
-  const data = scan(config(root), NOW);
-  const products = data.floors.find((f) => f.id === 'products');
-  const research = data.floors.find((f) => f.id === 'research');
-  assert.deepEqual(products.desks.map((d) => d.name), ['fresh']);
-  assert.deepEqual(research.desks.map((d) => d.name), ['Old Project']);
-  assert.equal(research.rooms.length, 1);
-  assert.deepEqual(research.rooms[0].desks.map((d) => d.name), ['sub1', 'sub2']);
-  const [sub1, sub2] = research.rooms[0].desks;
-  assert.equal(sub1.dust, 3);
-  assert.equal(sub2.dust, 0);
-  assert.equal(research.rooms[0].skills[0].name, 'x');
-  assert.deepEqual(research.rooms[0].triggers, ['"go" → run']);
-  assert.equal(products.desks[0].lamp, 'active');
-  assert.equal(research.desks[0].lamp, 'idle');
-  assert.equal(research.desks[0].dust, 3);
-  const all = [...products.desks, ...research.desks, ...research.rooms[0].desks].map((d) => d.name);
-  assert.ok(!all.includes('plain-folder') && !all.includes('agents-desk'));
+test('scan: every project is a room on its floor; folders, excluded and embedded repos are not', () => {
+  const data = scan(config(fixtureRoot()), NOW, manifestDir());
+  const [products, research] = data.floors;
+  assert.deepEqual(products.rooms.map((r) => r.name), ['fresh']);
+  assert.deepEqual(research.rooms.map((r) => r.name), ['Big Repo', 'Old Project']);
+  const all = data.floors.flatMap((f) => f.rooms.map((r) => r.name));
+  assert.ok(!all.includes('plain-folder') && !all.includes('agents-desk') && !all.includes('Side Repo'));
+});
+
+test('scan: dust and lamps come from the last commit', () => {
+  const data = scan(config(fixtureRoot()), NOW, manifestDir());
+  const fresh = data.floors[0].rooms[0];
+  const old = data.floors[1].rooms.find((r) => r.name === 'Old Project');
+  assert.deepEqual([fresh.lamp, fresh.dust], ['active', 0]);
+  assert.deepEqual([old.lamp, old.dust], ['idle', 3]);
+});
+
+test('scan: stations merge SKILL.md skills with the manifest, embedded repos become stations', () => {
+  const big = scan(config(fixtureRoot()), NOW, manifestDir()).floors[1].rooms.find((r) => r.name === 'Big Repo');
+  assert.deepEqual(big.stations.map((s) => s.id), ['skill:x', 'sub1', 'repo:side-repo']);
+  assert.equal(big.stations[1].risk, 'readonly');
+  assert.equal(big.embedded[0].name, 'Side Repo');
+  assert.equal(big.embedded[0].skills[0].name, 'side');
+  assert.deepEqual(big.triggers, ['"go" → run']);
+  assert.equal(big.notes, 'n');
+});
+
+test('scan: a project without skills or manifest gets a baseline station', () => {
+  const fresh = scan(config(fixtureRoot()), NOW, manifestDir()).floors[0].rooms[0];
+  assert.deepEqual(fresh.stations.map((s) => s.id), ['general']);
+});
+
+test('scan: a broken manifest becomes a warning, not a crash', () => {
+  const data = scan(config(fixtureRoot()), NOW, manifestDir());
+  assert.equal(data.warnings.length, 1);
+  assert.match(data.warnings[0], /old-project/);
+});
+
+test('levelFor: config beats manifest beats default; unknown values fall back to plan', () => {
+  const cfg = { levels: { default: 'plan', a: 'approve', b: 'nonsense' } };
+  assert.equal(levelFor(cfg, 'a', 'a', { level: 'read-only' }), 'approve');
+  assert.equal(levelFor(cfg, 'c', 'c', { level: 'read-only' }), 'read-only');
+  assert.equal(levelFor(cfg, 'b', 'b', null), 'plan');
+  assert.equal(levelFor({}, 'x', 'x', null), 'plan');
+  assert.equal(scan(config(fixtureRoot()), NOW, manifestDir()).floors[0].rooms[0].level, 'approve');
+  assert.equal(scan(config(fixtureRoot()), NOW, manifestDir()).floors[1].rooms[0].level, 'read-only');
 });
 
 test('scan never changes the repos it reads', () => {
@@ -75,7 +112,7 @@ test('scan never changes the repos it reads', () => {
   // Measure with stat only: running `git status` here would itself refresh the index.
   const index = () => statSync(join(repo, '.git/index')).mtimeMs;
   const before = index();
-  scan(config(root), NOW);
+  scan(config(root), NOW, manifestDir());
   assert.equal(index(), before);
   assert.equal(git(repo, ['--no-optional-locks', 'status', '--porcelain']).includes('untracked.txt'), true);
 });
@@ -85,7 +122,7 @@ test('linkWorkspace: creates, is idempotent, removes stale symlinks only', () =>
   const ws = tmp();
   const cfg = config(root);
   const first = linkWorkspace(cfg, ws);
-  assert.deepEqual(first.created.sort(), ['big-repo', 'fresh', 'old-project']);
+  assert.deepEqual(first.created.sort(), ['big-repo', 'fresh', 'old-project', 'side-repo']);
   assert.equal(readlinkSync(join(ws, 'fresh')), join(root, 'fresh'));
   assert.equal(linkWorkspace(cfg, ws).created.length, 0);
   write(ws, 'keep.txt', 'regular file');
@@ -98,4 +135,24 @@ test('linkWorkspace: creates, is idempotent, removes stale symlinks only', () =>
 test('slugify handles spaces, case and non-ascii', () => {
   assert.equal(slugify('Eğitimler Özel'), 'egitimler-ozel');
   assert.equal(slugify('Emrecan CV'), 'emrecan-cv');
+});
+
+test('gitInfo does not run a repo-configured fsmonitor hook', () => {
+  const root = tmp();
+  const repo = join(root, 'evil');
+  makeRepo(repo, [['a.txt', '2026-06-01T10:00:00Z']]);
+  const marker = join(root, 'pwned');
+  write(root, 'hook.sh', `#!/bin/sh\ntouch '${marker}'\n`);
+  chmodSync(join(root, 'hook.sh'), 0o755);
+  git(repo, ['config', 'core.fsmonitor', join(root, 'hook.sh')]);
+  gitInfo(repo);
+  assert.equal(existsSync(marker), false);
+});
+
+test('gitInfo branch is the plain branch name even when a tag shares it', () => {
+  const root = tmp();
+  const repo = join(root, 'r');
+  makeRepo(repo, [['a.txt', '2026-06-01T10:00:00Z']]);
+  git(repo, ['tag', 'main']);
+  assert.equal(gitInfo(repo).branch, 'main');
 });

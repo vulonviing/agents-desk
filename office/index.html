@@ -21,12 +21,19 @@
   </header>
   <main class="stage">
     <section class="view" id="view">
-      <canvas id="floor" aria-label="Ofis katı"></canvas>
+      <canvas id="floor" aria-label="Ofis kat planı"></canvas>
+      <button id="back" class="back" type="button" hidden>← Kata dön</button>
+      <div class="zoom" role="group" aria-label="Yakınlaştırma">
+        <button id="zoom-in" type="button" aria-label="Yakınlaştır">+</button>
+        <button id="zoom-out" type="button" aria-label="Uzaklaştır">−</button>
+        <button id="zoom-fit" type="button" aria-label="Tüm katı sığdır">⟲</button>
+      </div>
+      <p class="hint">tekerlekle yakınlaş · sürükleyerek kaydır · odaya girmek için tıkla</p>
       <ul id="desk-list" class="sr-only"></ul>
       <p id="empty" class="empty" hidden></p>
     </section>
     <aside id="panel" class="panel" hidden aria-live="polite"></aside>
   </main>
-  <script type="module" src="js/floor.js"></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>

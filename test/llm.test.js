@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { resolve, join } from 'node:path';
+import { runDecision, providerOf, strictSchema, withoutTools } from '../server/llm.js';
+const schema = {type:'object',properties:{reply:{type:'string'}},required:['reply']};
+test('provider validation and nested strict schemas', () => {
+  assert.equal(providerOf(), 'claude');
+  assert.throws(() => providerOf('other'));
+  const s = strictSchema({type:'object',properties:{a:{type:'array',items:schema}}});
+  assert.equal(s.additionalProperties,false);
+  assert.equal(s.properties.a.items.additionalProperties,false);
+});
+test('Codex model catalog removes native execution and delegation capabilities', () => {
+  assert.throws(() => withoutTools({models:[]}));
+  const [model] = withoutTools({models:[{slug:'chosen-model', apply_patch_tool_type:'freeform', tool_mode:'code_mode_only'}]}).models;
+  assert.equal(model.slug,'chosen-model');
+  assert.equal(model.apply_patch_tool_type,null);
+  assert.equal(model.multi_agent_version,'none');
+  assert.deepEqual(model.experimental_supported_tools,[]);
+});
+test('Codex CLI uses subscription credentials, denies tools and reports errors', async (t) => {
+  mkdirSync('data/test-cli',{recursive:true});
+  const dir=mkdtempSync(resolve('data/test-cli','test-'));
+  const log=join(dir,'calls.jsonl');
+  const keys=['DESK_CODEX_BIN','DESK_CODEX_LOG','DESK_CODEX_FAIL','DESK_CODEX_TOOL','OPENAI_API_KEY','ANTHROPIC_API_KEY'];
+  const previous=Object.fromEntries(keys.map((k)=>[k,process.env[k]]));
+  t.after(()=> { for(const k of keys) if(previous[k] === undefined) delete process.env[k]; else process.env[k]=previous[k]; rmSync(dir,{recursive:true,force:true}); });
+  Object.assign(process.env,{DESK_CODEX_BIN:resolve('test/fake-codex.mjs'),DESK_CODEX_LOG:log,OPENAI_API_KEY:'test-only',ANTHROPIC_API_KEY:'test-only'});
+  assert.deepEqual(await runDecision('manager','cv',schema,{provider:'codex'}),{reply:'codex reply'});
+  const call=JSON.parse(readFileSync(log,'utf8').trim());
+  assert.deepEqual(call.apiKeys,[]);
+  assert.ok(call.args.includes('shell_tool'));
+  assert.ok(call.args.includes('image_generation'));
+  assert.ok(call.args.includes('read-only'));
+  assert.equal(call.schema.additionalProperties,false);
+  process.env.DESK_CODEX_FAIL='1';
+  await assert.rejects(runDecision('manager','cv',schema,{provider:'codex'}),/quota exhausted/);
+  delete process.env.DESK_CODEX_FAIL; process.env.DESK_CODEX_TOOL='1';
+  await assert.rejects(runDecision('manager','cv',schema,{provider:'codex'}),/Codex/);
+});

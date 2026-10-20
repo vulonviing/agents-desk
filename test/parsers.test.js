@@ -71,3 +71,10 @@ test('dust, lamp and classify rules', () => {
   assert.equal(classify('y', { assignments: {}, defaultFloor: 'products' }), 'products');
   assert.equal(ageInDays('2026-01-01T00:00:00Z', Date.parse('2026-01-11T12:00:00Z')), 10);
 });
+
+test('shellQuote neutralizes quotes, $() and backticks in paths', async () => {
+  const { shellQuote } = await import('../office/js/panel.js');
+  assert.equal(shellQuote('/a b/c'), "'/a b/c'");
+  assert.equal(shellQuote("/x'; rm -rf ~; '"), "'/x'\\''; rm -rf ~; '\\'''");
+  assert.equal(shellQuote('/$(id)/`id`'), "'/$(id)/`id`'");
+});

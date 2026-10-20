@@ -1,14 +1,38 @@
 {
-  "roots": ["~/Documents"],
-  "exclude": ["agents-desk"],
+  "roots": [
+    "~/Documents"
+  ],
+  "exclude": [
+    "agents-desk"
+  ],
   "port": 4317,
-  "dust": { "light": 14, "medium": 45, "heavy": 120 },
-  "lamp": { "activeDays": 1, "weekDays": 7 },
+  "dust": {
+    "light": 14,
+    "medium": 45,
+    "heavy": 120
+  },
+  "lamp": {
+    "activeDays": 1,
+    "weekDays": 7
+  },
+  "sessions": {
+    "projectsDir": "~/.claude/projects",
+    "liveMinutes": 10
+  },
   "defaultFloor": "products",
   "floors": [
-    { "id": "products", "name": "Ürünler" },
-    { "id": "research", "name": "Araştırma" },
-    { "id": "growth", "name": "Kişisel Gelişim" }
+    {
+      "id": "products",
+      "name": "Ürünler"
+    },
+    {
+      "id": "research",
+      "name": "Araştırma"
+    },
+    {
+      "id": "growth",
+      "name": "Kişisel Gelişim"
+    }
   ],
   "assignments": {
     "Agents Extension": "products",
@@ -33,22 +57,21 @@
     "nazmi-tez-asistani": "research",
     "Portfolio": "growth",
     "interview-assistant": "growth",
-    "cv-checker": "growth"
+    "cv-checker": "growth",
+    "Emrecan CV": "growth",
+    "normalcy-axis": "research"
   },
-  "rooms": [
-    {
-      "id": "emrecan-cv",
-      "name": "Emrecan CV",
-      "floor": "growth",
-      "repo": "Emrecan CV",
-      "subsystems": [
-        { "name": "base", "path": "base" },
-        { "name": "linkedin_collector", "path": "linkedin_collector" },
-        { "name": "application_preparer", "path": "application_preparer" },
-        { "name": "phd_collector", "path": "phd_collector" },
-        { "name": "jobbot", "path": "jobbot" }
-      ],
-      "repos": ["DIL Application"]
-    }
+  "embed": {
+    "Emrecan CV": [
+      "DIL Application"
+    ]
+  },
+  "levels": {
+    "default": "plan",
+    "emrecan-vps": "read-only",
+    "Emrecan CV": "approve"
+  },
+  "include": [
+    "normalcy-axis-project/normalcy-axis"
   ]
 }

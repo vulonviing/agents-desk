@@ -27,3 +27,16 @@ export const LAMP_TEXT = {
 };
 
 export const DUST_TEXT = ['', 'Hafif tozlu', 'Tozlu', 'Çok tozlu, ajan uyuyor'];
+
+// Short label for a live session: tool and file name only, never message text.
+export function liveText(live) {
+  if (live.state === 'working') return live.tool ? (live.file ? `${live.tool}: ${live.file}` : live.tool) : 'çalışıyor';
+  return live.reason === 'turn' ? 'cevap bekliyor' : 'izin/araç bekliyor';
+}
+
+export function liveSentence(live) {
+  const ago = live.ageSec < 60 ? `${live.ageSec} sn önce` : `${Math.round(live.ageSec / 60)} dk önce`;
+  if (live.state === 'working') return `Çalışıyor${live.tool ? ` — ${liveText(live)}` : ''} (son hareket ${ago})`;
+  if (live.reason === 'turn') return `Senden cevap bekliyor (son hareket ${ago})`;
+  return `Araç sonucu ya da izin bekliyor${live.tool ? ` — ${liveText(live)}` : ''} (son hareket ${ago})`;
+}

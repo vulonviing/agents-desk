@@ -1,0 +1,11 @@
+{
+  "slug": "mahur",
+  "level": "plan",
+  "notes": "Spotify odaklı macOS uygulaması. 'başlat' derlemeden hazır Release'i açar; xcodebuild yalnız açıkça istenince.",
+  "stations": [
+    { "id": "uygulama", "name": "Uygulama", "description": "Mahur uygulaması: keşif, çalma, sağlayıcılar, Spotify entegrasyonu.", "paths": ["Mahur/"], "risk": "effect" },
+    { "id": "testler", "name": "Testler", "description": "MahurTests.", "paths": ["MahurTests/"], "risk": "readonly" },
+    { "id": "baslat", "name": "Başlat", "description": "Hazır Release uygulamasını derlemeden açar.", "risk": "effect" },
+    { "skill": "ui-check", "risk": "readonly" }
+  ]
+}

@@ -5,3 +5,4 @@ workspace/
 *.log
 .playwright-mcp/
 shot-*.png
+app/dist/
