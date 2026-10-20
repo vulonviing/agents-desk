@@ -40,6 +40,11 @@ not a grid of furniture on a carpet. Skills are grouped into purpose-based depar
 7. **Reachability.** Every station and every spot is reachable from the door (A*, `systems/pathfinding.ts`), also with characters at their seats.
 8. **Determinism.** Layout is a pure function of the room (stations, kind); same input → same output. No `Math.random` in layout.
 
+## Rooms (oda) inside an office (ofis)
+- Departments of a large office are rooms with a door, a plate and a dress (`officeDesign.ts` → `Department.dress/step`, `maps/roomDress.ts`). Order rooms by the workflow they serve and number them.
+- A one-room office (≤ 6 stations) is one open room with a dress too (e.g. cv-checker); put a central piece (table, instruments) where the floor would otherwise be empty — empty central floor is the same mistake as a padded office.
+- Dress and decoration direction: `floor-interior-design` (kat → ofis → oda).
+
 ## Checks (must pass before "done")
 - Unit tests (`app/src/game/maps/maps.test.ts`, `game.test.ts`: "no padded offices", "no stretched office"): no overlapping desk cells, all access tiles walkable, all spots reachable, pitch/measure constants, empty-area limits per zone, determinism.
 - Add a test for every new rule (a rule without a test is a wish).

@@ -13,7 +13,8 @@ import { decide } from './policy.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BRIDGE = join(HERE, 'approve-mcp.js');
 const MAX_LOG = 300;
-const SAFE_ALLOWED = ['Read', 'Grep', 'Glob', 'Skill'];
+// Secret files stay unreadable even if the bridge were bypassed; the bridge (server/policy.js) decides every tool call, reads included.
+const SECRET_READS = ['Read(**/.env*)', 'Read(.env*)', 'Read(**/*.pem)', 'Read(**/*.key)', 'Read(**/id_rsa*)', 'Read(**/id_ed25519*)', 'Read(**/.netrc)', 'Read(**/.npmrc)', 'Read(**/credentials*)', 'Read(**/.ssh/**)', 'Read(**/.aws/**)', 'Read(**/.git/**)'];
 
 const clip = (s, n) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
@@ -105,20 +106,17 @@ export function createRunner({ getRoom, emit, approveUrl, dataDir }) {
     const level = room.level;
     const args = [
       '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
-      '--restricted', '--tools', toolsFor(level), '--allowedTools', ...SAFE_ALLOWED,
-      '--disallowedTools', 'Read(**/.env*)', 'Read(.env*)',
+      '--restricted', '--tools', toolsFor(level),
+      '--disallowedTools', ...SECRET_READS,
       '--permission-mode', 'manual',
       '--append-system-prompt', workerPrompt(room, level),
     ];
+    // every level goes through the approval bridge, so secret-file and project-root checks run on each call (reads included)
     const runDir = join(dataDir, 'runs', run.id);
-    if (level === 'approve') {
-      mkdirSync(runDir, { recursive: true });
-      const mcp = join(runDir, 'mcp.json');
-      writeFileSync(mcp, JSON.stringify({ mcpServers: { desk: { command: process.execPath, args: [BRIDGE], env: { DESK_APPROVE_URL: typeof approveUrl === 'function' ? approveUrl() : approveUrl, DESK_RUN_ID: run.id, DESK_RUN_TOKEN: run.token } } } }), { mode: 0o600 });
-      args.push('--permission-prompts', 'host', '--permission-prompt-tool', 'mcp__desk__approve', '--mcp-config', mcp, '--strict-mcp-config');
-    } else {
-      args.push('--permission-prompts', 'none', '--strict-mcp-config');
-    }
+    mkdirSync(runDir, { recursive: true });
+    const mcp = join(runDir, 'mcp.json');
+    writeFileSync(mcp, JSON.stringify({ mcpServers: { desk: { command: process.execPath, args: [BRIDGE], env: { DESK_APPROVE_URL: typeof approveUrl === 'function' ? approveUrl() : approveUrl, DESK_RUN_ID: run.id, DESK_RUN_TOKEN: run.token } } } }), { mode: 0o600 });
+    args.push('--permission-prompts', 'host', '--permission-prompt-tool', 'mcp__desk__approve', '--mcp-config', mcp, '--strict-mcp-config');
 
     const matcher = buildMatcher(room);
     const child = spawnClaude(args, { cwd: room.path, env: {} });

@@ -123,14 +123,16 @@ test('approve level: the CLI is started restricted, with the bridge, in the proj
   assert.match(JSON.parse(call.stdin).message.content[0].text, /Onaylanan plan:\n1\. \[style\] oku\n2\. \[Prep\] üret/);
 });
 
-test('read-only level: no bridge, no write tools, edits are refused', async (t) => {
+test('read-only level: the bridge decides every call (reads included), no write tools, edits are refused', async (t) => {
   const { runner, calls, done } = await setup(t, 'read-only', (p) => [{ tool: 'Edit', input: { file_path: join(p, 'a') } }]);
   runner.start('cv', 'p1', { steps: [{ stationId: 'skill:style', stationName: 'style', action: 'oku', executable: true }] }, 'x');
   await done();
   const call = calls().find((c) => c.mode === 'worker');
   assert.equal(call.args[call.args.indexOf('--tools') + 1], 'Read,Grep,Glob,Skill');
-  assert.ok(!call.args.includes('--mcp-config'));
-  assert.equal(call.args[call.args.indexOf('--permission-prompts') + 1], 'none');
+  assert.ok(call.args.includes('--mcp-config'));
+  assert.ok(!call.args.includes('--allowedTools'), 'no pre-allowed tools: they would skip the policy');
+  assert.equal(call.args[call.args.indexOf('--permission-prompts') + 1], 'host');
+  assert.ok(call.args.includes('Read(**/.ssh/**)'));
   assert.equal(calls().find((c) => c.mode === 'worker-tool').verdict, 'deny');
 });
 

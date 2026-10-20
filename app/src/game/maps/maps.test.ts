@@ -8,6 +8,7 @@ import { themeOf } from './catalog';
 import { buildFloorMap } from './floorMap';
 import { buildMasterMap, MASTER_ID, MASTER_SEAT } from './masterMap';
 import { buildRoomMap } from './roomMap';
+import { DRESSES, dressOf } from './roomDress';
 import { propsOf, type TiledMap, type TiledObjectLayer, type TiledTileLayer } from './tiled';
 
 const station = (id: string): Station => ({ id, skill: null, name: id, description: '', kind: 'task', risk: 'readonly', runsOn: 'local', scripts: [], paths: [], repo: null, source: 'manifest' });
@@ -165,6 +166,38 @@ describe('room map', () => {
   });
 });
 
+
+describe('office interiors (kat → ofis → oda)', () => {
+  const atlas = JSON.parse(readFileSync(new URL('../../../public/assets/generated/props.json', import.meta.url), 'utf8'));
+  const cvIds = ['skill:already-built-guard', 'skill:application-final-layout-check', 'skill:application-package', 'skill:batch-ingest', 'skill:build-and-bundle', 'skill:cover-letter-bridge-check', 'skill:cover-letter-math', 'skill:cover-letter-style', 'skill:cv-cl-core-rules', 'skill:cv-tailoring-deep', 'skill:job-evaluation-criteria', 'skill:job-filter-local', 'skill:jobtable', 'skill:posting-nuance-warnings', 'linkedin-collector', 'application-preparer', 'base-kutuphane'];
+  const cv = { id: 'emrecan-cv', name: 'Emrecan CV', skills: [], stations: cvIds.map((id) => ({ id, name: id, skill: id.startsWith('skill:') ? id.slice(6) : null, kind: id.startsWith('skill:') ? 'skill' : 'task', risk: 'readonly', runsOn: 'local', scripts: [], paths: [], repo: null, source: 'manifest', description: '' })) } as unknown as Room;
+  it('Emrecan CV has a workflow of rooms 1–4, a coordinator room and a library, each with its own dress', () => {
+    const l = layoutRoom(cv);
+    const byDress = new Map(l.departments.map((d) => [d.dress, d]));
+    for (const key of ['coordination', 'radar', 'tailor', 'letters', 'delivery', 'archive']) expect(byDress.has(key)).toBe(true);
+    expect(['radar', 'tailor', 'letters', 'delivery'].map((k) => byDress.get(k)!.step)).toEqual(['1', '2', '3', '4']);
+    // rooms of one office look different: no two rooms share a floor material
+    const floors = l.departments.map((d) => dressOf(d.dress)!.floor);
+    expect(new Set(floors).size).toBe(floors.length);
+  });
+  it('cv-checker is a review laboratory with its own dress', () => {
+    const l = layoutRoom({ ...cv, id: 'cv-checker', stations: cv.stations.slice(0, 5) } as Room);
+    expect(l.departments).toHaveLength(1);
+    expect(l.departments[0]!.dress).toBe('checker');
+    expect(l.departments[0]!.name).toMatch(/kontrol/i);
+  });
+  it('every dress uses real atlas frames and a valid floor material', () => {
+    for (const [key, dress] of Object.entries(DRESSES)) {
+      for (const f of [...dress.back, ...dress.corners.map((c) => c.frame)]) expect(atlas.frames, `${key}:${f}`).toHaveProperty(f);
+    }
+  });
+  it('builds the Emrecan CV office map with the rooms dressed (art and corner pieces present)', () => {
+    const l = layoutRoom(cv);
+    const { map } = buildRoomMap(l, cv, 'growth', 2);
+    const frames = new Set(objects(map, 'furniture').map((o) => String(propsOf(o).frame)));
+    for (const f of ['radar_screen', 'cv_drafts', 'mannequin', 'quote_wall', 'checklist_board', 'archive_cabinets', 'runner_terracotta']) expect(frames.has(f), f).toBe(true);
+  });
+});
 
 describe('master office', () => {
   it('builds a furnished office with exactly one manager seat and no project stations', () => {

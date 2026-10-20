@@ -1,7 +1,8 @@
 import type { Room } from '../../types';
 import { TILE } from '../constants';
 import type { RoomLayout } from '../layout/roomLayout';
-import { COLLISION_GID, faceGid, floorGid, hash, PROJECT_FLOORS, TILESETS, themeGid, wallGid } from './catalog';
+import { COLLISION_GID, faceGid, floorGid, hash, TILESETS, themeGid, themeOf, wallGid } from './catalog';
+import { dressOf } from './roomDress';
 import type { FloorMapResult } from './floorMap';
 import { deskSet, sprite, type Placer } from './furniture';
 import { MapBuilder, prop } from './tiled';
@@ -10,7 +11,8 @@ import { MapBuilder, prop } from './tiled';
 
 const T = TILE;
 
-export function buildRoomMap(layout: RoomLayout, room: Room): FloorMapResult {
+export function buildRoomMap(layout: RoomLayout, room: Room, floorId = '', floorIndex = 0): FloorMapResult {
+  const floorTheme = themeOf(floorId, floorIndex);
   const W = layout.tilesW;
   const H = layout.tilesH;
   const b = new MapBuilder(W, H);
@@ -23,7 +25,6 @@ export function buildRoomMap(layout: RoomLayout, room: Room): FloorMapResult {
   const coordinatorSeats = b.objectLayer('desks');
   const p: Placer = { b, list: furniture };
   const at = (x: number, y: number) => y * W + x;
-  const style = layout.theme === 'music' ? 'carpetD' : layout.theme === 'research' ? 'carpetB' : PROJECT_FLOORS[hash(room.id) % PROJECT_FLOORS.length]!;
   const themed = layout.theme === 'music' || layout.theme === 'research';
   const color = hash(`${room.id}#wall`);
 
@@ -38,11 +39,12 @@ export function buildRoomMap(layout: RoomLayout, room: Room): FloorMapResult {
     }
     const zone = layout.departments.find(z => x >= z.x && x < z.x + z.w && y >= z.y && y < z.y + z.h);
     if (zone && y <= zone.y + 1 && layout.partitions[y]![x]) {
-      walls[k] = themed ? themeGid(layout.theme, y === zone.y ? 1 : 2) : faceGid(layout.departments.indexOf(zone), y === zone.y ? 0 : 1);
+      const dress = dressOf(zone.dress);
+      walls[k] = themed ? themeGid(layout.theme, y === zone.y ? 1 : 2) : faceGid(dress ? dress.wall : layout.departments.indexOf(zone), y === zone.y ? 0 : 1);
     } else if (wall[y]![x]) {
       walls[k] = wallGid((isWall(x, y - 1) ? 1 : 0) | (isWall(x + 1, y) ? 2 : 0) | (isWall(x, y + 1) ? 4 : 0) | (isWall(x - 1, y) ? 8 : 0));
     } else {
-      ground[k] = themed ? themeGid(layout.theme, 0) : floorGid(zone?.floor ?? style, x, y);
+      ground[k] = themed ? themeGid(layout.theme, 0) : floorGid(zone ? dressOf(zone.dress)?.floor ?? zone.floor : floorTheme.corridor, x, y);
     }
     if (!layout.grid[y]![x]) collision[k] = COLLISION_GID;
   }
@@ -53,21 +55,34 @@ export function buildRoomMap(layout: RoomLayout, room: Room): FloorMapResult {
   const base = 34;
   sprite(p, books > 6 ? 'lz_shelf_books_b' : 'lz_shelf_books_a', 30, base + 4);
   if (books > 12) sprite(p, 'lz_shelf_books_a', 76, base + 4);
-  sprite(p, 'lz_window_white', 122, base - 4, { layer: 'wall' });
-  sprite(p, 'clock', 158, base - 10, { layer: 'wall' });
+  sprite(p, 'lz_window_white', layout.openPlan && layout.departments[0] && dressOf(layout.departments[0].dress)?.openBack ? 96 : 122, base - 4, { layer: 'wall' });
+  if (!(layout.openPlan && layout.departments[0] && dressOf(layout.departments[0].dress)?.openBack)) sprite(p, 'clock', 158, base - 10, { layer: 'wall' });
   sprite(p, 'door_office', layout.door.x * T + T, base + 2, { layer: 'wall' });
   sprite(p, 'lz_plant_a', 18, base + 22);
 
-  // Department walls carry purpose-specific furniture, keeping walking aisles clear.
+  // Every room has its own dress: back-wall art, corner pieces; rooms without one keep the generic wall furniture.
   for (const z of layout.departments) {
-    const frame = layout.theme === 'music' ? 'music_poster' : layout.theme === 'research' ? 'research_board' : z.id === 'opportunities' ? 'opportunity_board' : z.id === 'letters' ? 'letter_board' : 'research_board';
-    sprite(p, frame, (z.x + 2) * T, (z.y + 2) * T, { layer: 'wall' });
-    sprite(p, layout.theme === 'music' ? 'vinyl_rack' : 'lz_shelf_books_a', (z.x + z.w - 2) * T, (z.y + 2) * T + 4, { layer: 'wall' });
+    const dress = dressOf(z.dress);
+    if (!dress) {
+      const frame = layout.theme === 'music' ? 'music_poster' : layout.theme === 'research' ? 'research_board' : z.id === 'opportunities' ? 'opportunity_board' : z.id === 'letters' ? 'letter_board' : 'research_board';
+      sprite(p, frame, (z.x + 2) * T, (z.y + 2) * T, { layer: 'wall' });
+      sprite(p, layout.theme === 'music' ? 'vinyl_rack' : 'lz_shelf_books_a', (z.x + z.w - 2) * T, (z.y + 2) * T + 4, { layer: 'wall' });
+      continue;
+    }
+    const south = z.doorY === z.y; // door in the top wall: keep the back wall free there
+    const from = layout.openPlan ? z.x + 12 : z.x + 2, to = layout.openPlan ? z.x + z.w - 10 : z.x + z.w - (south ? 5 : 2);
+    dress.back.forEach((frame, i) => sprite(p, frame, layout.openPlan && dress.openBack ? dress.openBack[i]! : (from + ((to - from) * (i + 0.5)) / dress.back.length) * T, (z.y + 3) * T - 2, { layer: 'wall' }));
+    const bottom = (z.y + z.h - 1) * T - 3;
+    const doorAtBottom = !south && !layout.openPlan;
+    for (const c of dress.corners) {
+      if (c.at === 'abs') { sprite(p, c.frame, c.dx ?? 0, c.dy ?? 0); continue; }
+      const cx = c.at === 'bl' ? (z.x + 3) * T : c.at === 'bm' ? (z.x + z.w / 2) * T : (z.x + z.w - (doorAtBottom ? 6.5 : 3)) * T;
+      sprite(p, c.frame, cx + (c.dx ?? 0), bottom + (c.dy ?? 0));
+    }
   }
-  for (let x = 5; !layout.openPlan && x < W - 4; x += 11) {
-    const cy = layout.hallY;
-    sprite(p, layout.theme === 'music' ? 'rug_lilac' : x % 2 ? 'rug_sage' : 'rug_coral', x * T, (cy + 4) * T, { layer: 'floor' });
-  }
+  // the hall: the floor's runner and a couple of its set pieces instead of identical rugs
+  for (let x = 2 * T + 32; !layout.openPlan && x + 32 < (W - 2) * T; x += 64) sprite(p, floorTheme.runner, x, (layout.hallY + 3.4) * T, { layer: 'floor' });
+  if (!layout.openPlan) floorTheme.vignettes.slice(0, 2).forEach((v, i) => v.pieces.forEach((pc) => sprite(p, pc.frame, (i ? W * 0.68 : W * 0.34) * T + pc.dx, (layout.hallY + 4.6) * T + (pc.dy ?? 0), pc.layer ? { layer: pc.layer } : {})));
   sprite(p, layout.theme === 'music' ? 'vinyl_rack' : 'lz_shelf_books_a', 5 * T, (H - 2) * T);
   sprite(p, 'flowerbox', 9 * T, (H - 2) * T);
   sprite(p, 'cat_sleep', (W - 9) * T, (H - 2) * T, { layer: 'floor' });

@@ -185,12 +185,12 @@ export class OfficeScene extends Phaser.Scene {
       const room = floor.rooms.find((r) => r.id === view.roomId);
       if (!room) return;
       this.layout = layoutRoom(room);
-      result = buildRoomMap(this.layout, room);
+      result = buildRoomMap(this.layout, room, view.floorId, floorIndex);
     }
     this.materialize(result.map, result.worldW, result.worldH);
     this.buildSigns(floor);
     for (const z of this.layout?.openPlan ? [] : this.layout?.departments ?? []) {
-      const text = this.add.text((z.x + z.w / 2) * T, (z.y + 0.6) * T, z.name, { fontFamily: FONT, fontSize: '9px', color: '#fff8e8', backgroundColor: '#303044', padding: { x: 4, y: 2 } }).setOrigin(0.5, 0).setResolution(4).setDepth(1000);
+      const text = this.add.text((z.x + z.w / 2) * T, (z.y + 0.6) * T, `${/^\d$/.test(z.step) ? `${z.step} ▸ ` : ''}${z.name}`, { fontFamily: FONT, fontSize: '9px', color: '#fff8e8', backgroundColor: '#303044', padding: { x: 4, y: 2 } }).setOrigin(0.5, 0).setResolution(4).setDepth(1000);
       this.objects.push(text);
     }
     this.cam.setWorld(result.worldW, result.worldH);

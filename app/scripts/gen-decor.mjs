@@ -151,4 +151,79 @@ export function registerDecor(add) {
     for (let i = 0; i < 7; i++) { im.rect(4, 6 + i * 5, 24, 4, i % 2 ? '#a9acbc' : '#cfd2e0'); im.rect(4, 9 + i * 5, 24, 1, '#6b6f80'); }
     im.rect(2, 2, 2, 36, '#8f85a9'); im.rect(28, 2, 2, 36, '#8f85a9'); im.rect(12, 1, 8, 3, '#f0d060');
   });
+
+  // ===== OFFICE ROOMS: the career studio (Emrecan CV) and the CV checker =====
+  // radar room: finding opportunities
+  add('radar_screen', 26, 22, (im) => {
+    im.box(0, 0, 26, 22, '#1d2d2a', '#46606a'); im.rect(2, 2, 22, 16, '#0f2420');
+    for (let a = 0; a < 20; a++) { const t = (a / 20) * Math.PI; im.px(13 + Math.cos(t) * 8, 17 - Math.sin(t) * 12, '#2f7a5a'); im.px(13 + Math.cos(t) * 4, 17 - Math.sin(t) * 6, '#2f7a5a'); }
+    for (let i = 0; i < 9; i++) im.px(13 + i * 0.9, 17 - i * 1.3, '#7fffc0');
+    [[8, 9], [17, 7], [15, 13]].forEach(([x, y]) => { im.px(x, y, '#ffe08a'); im.px(x + 1, y, '#ffe08a'); });
+    im.rect(2, 19, 22, 1, '#46606a');
+  });
+  add('map_pins', 30, 22, (im) => {
+    im.box(0, 0, 30, 22, '#e8dfc4', '#7a6a4a');
+    [[4, 5, 8, 6], [14, 4, 9, 8], [8, 12, 12, 6]].forEach(([x, y, w, h]) => im.rect(x, y, w, h, '#b8c8a0'));
+    [[7, 7, '#e0584f'], [18, 8, '#4985cc'], [12, 14, '#f0a060'], [22, 13, '#e0584f'], [10, 6, '#6fd49a']].forEach(([x, y, c]) => { im.rect(x, y, 2, 2, c); im.px(x, y + 2, c); });
+  });
+  add('job_board', 28, 22, (im) => {
+    im.box(0, 0, 28, 22, '#3a4a5a', '#1d2a38'); im.rect(2, 2, 24, 3, '#6fb3ff'); im.rect(4, 3, 8, 1, '#ffffff');
+    [[3, 7], [11, 7], [19, 7], [3, 14], [11, 14], [19, 14]].forEach(([x, y], i) => { im.rect(x, y, 7, 6, '#f4f6fa'); im.rect(x + 1, y + 1, 5, 1, ['#6fb3ff', '#f0a060', '#6fd49a'][i % 3]); im.rect(x + 1, y + 3, 4, 1, '#a9acbc'); });
+  });
+  // tailoring workshop: the CV is made to measure
+  add('cv_drafts', 30, 22, (im) => {
+    im.box(0, 0, 30, 22, '#c8905a', '#7a4a2e');
+    [[3, 3], [11, 4], [19, 3], [7, 11], [16, 11]].forEach(([x, y], i) => { im.rect(x, y, 7, 8, '#ffffff'); im.rect(x, y, 7, 2, ['#e8805a', '#8aa07a', '#6fb3ff'][i % 3]); im.rect(x + 1, y + 4, 5, 1, '#a9acbc'); im.rect(x + 1, y + 6, 4, 1, '#a9acbc'); im.px(x + 3, y - 1, '#e0584f'); });
+  });
+  add('tape_measure', 28, 8, (im) => { im.rect(0, 1, 28, 6, '#f0d060'); im.rect(0, 1, 28, 1, '#c8a830'); for (let x = 1; x < 28; x += 3) im.rect(x, 5, 1, 2, '#3a3a50'); for (let x = 4; x < 28; x += 9) im.rect(x, 3, 1, 4, '#3a3a50'); });
+  add('mannequin', 16, 34, (im) => {
+    im.rect(7, 28, 2, 4, '#6b4a2e'); im.rect(4, 32, 8, 2, '#4a3220'); im.rect(6, 20, 4, 8, '#8f6a4a');
+    im.rect(4, 6, 8, 14, '#f4e8c4'); im.rect(3, 8, 10, 6, '#f4e8c4'); im.rect(5, 6, 6, 1, '#d8c8a0'); im.rect(7, 2, 2, 5, '#c8a070'); im.rect(7, 12, 2, 8, '#e8805a'); im.rect(5, 14, 6, 1, '#a84a2e');
+  });
+  add('fabric_rolls', 24, 18, (im) => { [['#e8805a', 1], ['#8aa07a', 8], ['#6fb3ff', 15]].forEach(([c, x]) => { im.rect(x, 4, 7, 13, c); im.rect(x, 4, 7, 2, '#ffffff55'); im.rect(x + 1, 1, 5, 4, '#f4e8c4'); im.rect(x, 16, 7, 1, '#00000033'); }); });
+  // letters studio: motivation and story
+  add('typewriter_desk', 28, 24, (im) => {
+    im.rect(1, 12, 26, 3, '#c8905a'); im.rect(1, 12, 26, 1, '#e0b078'); im.rect(3, 15, 2, 8, '#7a4a2e'); im.rect(23, 15, 2, 8, '#7a4a2e');
+    im.rect(8, 6, 11, 6, '#3a3a50'); im.rect(9, 7, 9, 3, '#565972'); im.rect(10, 1, 7, 6, '#ffffff'); im.rect(11, 2, 5, 1, '#a9acbc'); im.rect(11, 4, 4, 1, '#a9acbc');
+    im.rect(21, 9, 4, 3, '#f8f8f8'); im.rect(2, 9, 5, 3, '#f4e8c4');
+  });
+  add('letter_stack', 14, 12, (im) => { for (let i = 0; i < 3; i++) { im.rect(1 + i, 8 - i * 3, 11, 4, '#f8f8f8'); im.rect(1 + i, 8 - i * 3, 11, 1, '#b8a888'); im.px(6 + i, 10 - i * 3, '#e0584f'); } });
+  add('quote_wall', 28, 20, (im) => {
+    im.box(0, 0, 28, 20, '#fbf3e0', '#a87a4a'); im.rect(4, 3, 4, 4, '#e8805a'); im.rect(5, 6, 2, 2, '#e8805a'); im.rect(10, 4, 14, 1, '#8f6a4a'); im.rect(10, 7, 11, 1, '#8f6a4a'); im.rect(5, 12, 18, 1, '#8f6a4a'); im.rect(5, 15, 12, 1, '#8f6a4a');
+  });
+  // delivery: checks, stamps, parcels
+  add('checklist_board', 28, 22, (im) => {
+    im.box(0, 0, 28, 22, '#f4f6fa', '#4a5a6a'); im.rect(2, 2, 24, 3, '#6fd49a');
+    for (let i = 0; i < 4; i++) { const y = 7 + i * 4; im.rect(4, y, 3, 3, '#ffffff'); im.px(4, y + 1, '#2f8a5a'); im.px(5, y + 2, '#2f8a5a'); im.px(6, y, '#2f8a5a'); im.rect(10, y + 1, 12 - (i % 2) * 4, 1, '#a9acbc'); }
+  });
+  add('stamp_desk', 26, 20, (im) => {
+    im.rect(1, 8, 24, 3, '#c8905a'); im.rect(1, 8, 24, 1, '#e0b078'); im.rect(3, 11, 2, 8, '#7a4a2e'); im.rect(21, 11, 2, 8, '#7a4a2e');
+    im.rect(5, 2, 5, 6, '#e0584f'); im.rect(6, 1, 3, 2, '#a83a34'); im.rect(13, 5, 9, 3, '#f8f8f8'); im.rect(15, 6, 4, 1, '#e0584f');
+  });
+  add('parcel_shelf', 24, 32, (im) => {
+    im.rect(0, 0, 24, 32, '#7a4a2e'); im.rect(1, 1, 22, 30, '#a56a4a');
+    [[2, 3, 9, 7, '#d8b078'], [12, 5, 9, 5, '#c89a62'], [3, 13, 7, 6, '#c89a62'], [11, 12, 10, 7, '#d8b078'], [2, 22, 10, 8, '#d8b078'], [14, 23, 7, 7, '#c89a62']].forEach(([x, y, w, h, c]) => { im.rect(x, y, w, h, c); im.rect(x, y + Math.floor(h / 2), w, 1, '#a07848'); });
+    im.rect(0, 11, 24, 1, '#7a4a2e'); im.rect(0, 21, 24, 1, '#7a4a2e');
+  });
+  add('mailbox_wall', 22, 18, (im) => { im.box(0, 0, 22, 18, '#6b6f80', '#3a3a50'); for (let i = 0; i < 6; i++) { const x = 2 + (i % 3) * 6, y = 3 + Math.floor(i / 3) * 7; im.rect(x, y, 5, 5, '#a9acbc'); im.rect(x + 1, y + 1, 3, 1, '#3a3a50'); im.px(x + 2, y + 3, '#f0d060'); } });
+  // evidence library
+  add('archive_cabinets', 34, 32, (im) => {
+    [0, 11, 22].forEach((x, i) => { im.box(x, 0, 11, 32, ['#8aa07a', '#c8905a', '#6fb3ff'][i], '#3a3a50'); [3, 11, 19].forEach((y) => { im.rect(x + 2, y, 7, 6, '#00000022'); im.rect(x + 3, y + 1, 5, 2, '#f8f8f8'); im.rect(x + 4, y + 4, 3, 1, '#3a3a50'); }); });
+  });
+  add('scanner', 22, 16, (im) => { im.box(0, 5, 22, 10, '#cfd2e0'); im.rect(2, 7, 18, 5, '#3a3a50'); im.rect(3, 8, 16, 1, '#8cc0f0'); im.rect(0, 2, 22, 3, '#a9acbc'); im.px(19, 13, '#6fd49a'); });
+  // cv checker
+  add('score_board', 28, 24, (im) => {
+    im.box(0, 0, 28, 24, '#2a2f48', '#8f85a9'); im.rect(2, 2, 24, 3, '#f0a060');
+    [[3, 8, 20], [3, 13, 15], [3, 18, 24]].forEach(([x, y, w], i) => { im.rect(x, y, 22, 3, '#3a4060'); im.rect(x, y, w - 2, 3, ['#6fd49a', '#f0d060', '#6fb3ff'][i]); });
+  });
+  add('magnifier_stand', 16, 26, (im) => {
+    im.rect(7, 12, 2, 12, '#8a6a3c'); im.rect(3, 24, 10, 2, '#5a4030');
+    for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) { const dx = x - 5.5, dy = y - 5.5, d = dx * dx + dy * dy; if (d <= 30 && d >= 18) im.px(2 + x, y, '#b48a3c'); else if (d < 18) im.px(2 + x, y, '#cfe8f8'); }
+    im.rect(5, 3, 3, 2, '#ffffff');
+  });
+  add('resume_wall', 32, 22, (im) => {
+    im.box(0, 0, 32, 22, '#e8dfc4', '#7a6a4a');
+    [[3, '#e8805a'], [11, '#6fb3ff'], [19, '#8aa07a']].forEach(([x, c]) => { im.rect(x, 3, 8, 15, '#ffffff'); im.rect(x, 3, 8, 3, c); im.rect(x + 1, 8, 6, 1, '#a9acbc'); im.rect(x + 1, 10, 5, 1, '#a9acbc'); im.rect(x + 1, 12, 6, 1, '#a9acbc'); im.rect(x + 1, 14, 4, 1, '#a9acbc'); });
+    im.rect(27, 5, 3, 3, '#6fd49a'); im.px(28, 6, '#ffffff');
+  });
 }

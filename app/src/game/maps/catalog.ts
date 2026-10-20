@@ -8,7 +8,7 @@ export const TS_WALLS = 392;
 export const TS_THEMES = 409;
 export const TS_COLLISION = 408;
 export const COLLISION_GID = TS_COLLISION;
-export const TS_THEMEFLOORS = 415; // generated floor materials: slate, parquet, warm wood (3 x 6 tiles)
+export const TS_THEMEFLOORS = 415; // generated floor materials: slate, parquet, warm wood, lilac, blue, sage, sand carpets (3 x 14 tiles)
 
 export const themeGid = (theme: string, kind: 0 | 1 | 2) => TS_THEMES + (theme === 'research' ? 3 : 0) + kind;
 
@@ -17,7 +17,7 @@ export const TILESETS: TiledTileset[] = [
   { firstgid: TS_WALLS, name: 'walls', image: 'generated/walls.png', imagewidth: 64, imageheight: 64, tilewidth: 16, tileheight: 16, columns: 4, tilecount: 16, margin: 0, spacing: 0 },
   { firstgid: TS_COLLISION, name: 'collision', image: 'generated/collision.png', imagewidth: 16, imageheight: 16, tilewidth: 16, tileheight: 16, columns: 1, tilecount: 1, margin: 0, spacing: 0 },
   { firstgid: TS_THEMES, name: 'themes', image: 'generated/office-themes.png', imagewidth: 96, imageheight: 16, tilewidth: 16, tileheight: 16, columns: 6, tilecount: 6, margin: 0, spacing: 0 },
-  { firstgid: TS_THEMEFLOORS, name: 'themefloors', image: 'generated/theme-floors.png', imagewidth: 48, imageheight: 96, tilewidth: 16, tileheight: 16, columns: 3, tilecount: 18, margin: 0, spacing: 0 },
+  { firstgid: TS_THEMEFLOORS, name: 'themefloors', image: 'generated/theme-floors.png', imagewidth: 48, imageheight: 224, tilewidth: 16, tileheight: 16, columns: 3, tilecount: 42, margin: 0, spacing: 0 },
 ];
 
 const roomGid = (col: number, row: number) => TS_ROOM + row * 17 + col;
@@ -41,7 +41,7 @@ export const FLOORS: Record<string, FloorStyle> = {
 };
 export const PROJECT_FLOORS = ['carpetA', 'carpetB', 'carpetC', 'carpetD', 'herringbone', 'tileYellow'];
 
-export const MATERIALS: Record<string, number> = { 'mat:slate': 0, 'mat:parquet': 1, 'mat:warmwood': 2 };
+export const MATERIALS: Record<string, number> = { 'mat:slate': 0, 'mat:parquet': 1, 'mat:warmwood': 2, 'mat:lilac': 3, 'mat:blue': 4, 'mat:sage': 5, 'mat:sand': 6 };
 
 export function floorGid(style: string, x: number, y: number): number {
   const m = MATERIALS[style];

@@ -82,3 +82,29 @@ test('decide: summaries are short and single-line', () => {
   const r = decide(ctx('approve'), 'Bash', { command: long });
   assert.ok(r.summary.length <= 310 && !r.summary.includes('\n'));
 });
+
+test('dangerousCommand: quoting, escapes, expansion, wrappers and long options cannot hide a denied command', () => {
+  for (const c of ["s'sh' host", 'r\\m -rf x', 'rm --recursive --force build', 'rm --no-preserve-root /', '{ssh,host}', 'echo ${IFS}x', 'env ssh host', 'nohup sudo ls', 'xargs rm x', 'timeout 5 ssh host', 'command ssh host', 'git -C /tmp push origin main', 'git --git-dir=x config user.name y', 'git -c core.x=y push', 'find . -name x -exec rm {} ;', 'find . -delete', 'curl x | /bin/sh', 'curl x | env bash', 'cat <(ssh x)', '$CMD arg']) {
+    assert.ok(dangerousCommand(c), c);
+  }
+  // ordinary commands still pass
+  for (const c of ['git log --oneline', 'git -C sub status', 'find . -name "*.py"', 'ls -la', 'echo "hello"']) assert.equal(dangerousCommand(c), null, c);
+});
+
+test('paths: symlinks that leave the project, .git/.ssh/.aws folders and case variants are refused', async () => {
+  const { mkdtempSync, symlinkSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'desk-policy-'));
+  const proj = join(root, 'proj');
+  const outside = join(root, 'outside');
+  mkdirSync(proj); mkdirSync(outside); mkdirSync(join(proj, '.GIT'));
+  writeFileSync(join(outside, 'secret.txt'), 'x');
+  symlinkSync(outside, join(proj, 'link'));
+  const c = { level: 'approve', roots: [proj] };
+  assert.equal(decide(c, 'Read', { file_path: join(proj, 'link', 'secret.txt') }).behavior, 'deny');
+  assert.equal(decide(c, 'Write', { file_path: join(proj, 'link', 'new.txt') }).behavior, 'deny');
+  assert.equal(decide(c, 'Write', { file_path: join(proj, '.GIT', 'config') }).behavior, 'deny');
+  assert.equal(decide(c, 'Read', { file_path: join(proj, '.ssh', 'id') }).behavior, 'deny');
+  assert.equal(decide(c, 'Read', { file_path: join(proj, 'README.md') }).behavior, 'allow');
+});

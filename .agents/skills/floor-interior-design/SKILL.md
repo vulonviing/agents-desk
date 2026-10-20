@@ -23,6 +23,13 @@ Write the concept first (`FloorTheme.concept` in `app/src/game/maps/catalog.ts`)
 
 New floor → new concept, palette, material, runner, wall art and ≥ 3 vignettes. If it can be confused with another floor in a thumbnail, it is not distinct enough.
 
+## 1b. Kat → ofis → oda: the concept flows down
+- **Kat (floor)** sets the palette and materials of corridors and halls (`FLOOR_THEMES`). The office hall inside an office uses the floor's corridor material and runner, so entering an office still feels like the same floor.
+- **Ofis (office)** has its own story (Emrecan CV = the application pipeline; cv-checker = a review laboratory) expressed through its rooms.
+- **Oda (room)** has its own identity inside the office: a **dress** (`maps/roomDress.ts`) = floor material, wall colour, back-wall art and corner pieces. **No two rooms of one office share a floor material.** Rooms of a pipeline are numbered on their plates in workflow order (`1 ▸ İlan radar odası`, `2 ▸ CV atölyesi`, …); coordination (K) and support (D) rooms carry no number.
+- Dress rooms by what happens in them: radar (radar screen, map with pins, job board), tailor (CV drafts board, tape measure, mannequin, fabric rolls), letters (quote wall, typewriter desk, lamp, letters), delivery (checklist, mailboxes, stamp desk, parcel shelf), archive (shelves, cabinets, scanner), checker (resume wall, score board, review table with magnifier and scanner).
+- New office or room kind → add a dress (and sprites in `gen-decor.mjs`), never reuse a neighbour's.
+
 ## 2. Principles that make it look designed (not scattered)
 - **Rhythm**: along a corridor alternate art (north) and set pieces (south) at a steady pitch (~88 px); repeat a motif 2–3 times with variation, never the same sprite back to back.
 - **Hierarchy**: one focal point per space (the connector centerpiece, the elevator lobby); supporting pieces are smaller and quieter.
@@ -40,6 +47,7 @@ New floor → new concept, palette, material, runner, wall art and ≥ 3 vignett
 - Keep placement deterministic (no random): same floor → same dressing.
 
 ## 4. Checks (must pass before "done")
+- Interiors: test "office interiors" — rooms of an office have distinct floor materials, pipeline steps 1–4 in order, every dress uses real atlas frames.
 - Test "every floor has its own character": distinct corridor material, runner and accent; ≥ 5 wall-art frames and ≥ 3 vignettes per theme; every frame exists in the atlas; elevator and stairs present.
 - `visual-qa` screenshots of **all floors**, side by side mentally: can you name each floor's concept without reading? Are doors, connector and lane clear? Is any sprite clipped, floating or overlapping a plate?
 - Review ritual: (1) concept in one sentence, (2) three colours, (3) one material, (4) one focal point, (5) one story prop per 10 tiles.

@@ -564,7 +564,7 @@ buildOfficeThemes();
 
 // Floor materials of the three floors (3 x 2 tile seamless patterns, stacked): slate tiles, walnut parquet, warm wood.
 function buildThemeFloors() {
-  const sheet = new Img(48, 96);
+  const sheet = new Img(48, 32 * 7);
   const rng = (n) => { let h = n * 2654435761 >>> 0; h ^= h >>> 15; return ((h * 2246822519) >>> 0) / 4294967296; };
   const patterns = [
     // slate: square tiles with grout, a few blue flecks
@@ -604,6 +604,20 @@ function buildThemeFloors() {
       [[10, 12], [34, 26]].forEach(([x, y]) => { im.px(ox + x, oy + y, '#d8805a'); im.px(ox + x + 1, oy + y, '#8aa07a'); });
     },
   ];
+  // soft carpets for the rooms of an office: base colour + weave flecks
+  const carpet = (base, dark, light) => (im, ox, oy) => {
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 48; x++) {
+      let c = base;
+      const r = rng(x * 31 + y * 57);
+      if (r > 0.9) c = dark; else if (r < 0.08) c = light;
+      if ((x % 16 === 0 || y % 16 === 0)) c = dark;
+      im.px(ox + x, oy + y, c);
+    }
+  };
+  patterns.push(carpet('#b9a6d8', '#a590c8', '#cdbde6'));   // lilac
+  patterns.push(carpet('#8fb0d4', '#7a9cc4', '#a8c4e0'));   // blue
+  patterns.push(carpet('#a8c49a', '#92b084', '#bdd6b0'));   // sage
+  patterns.push(carpet('#d8c8a8', '#c8b690', '#e6d8bc'));   // sand
   patterns.forEach((draw, i) => draw(sheet, 0, i * 32));
   const png = new PNG({ width: sheet.w, height: sheet.h }); png.data = Buffer.from(sheet.d);
   writeFileSync(join(OUT, 'theme-floors.png'), PNG.sync.write(png));
