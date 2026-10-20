@@ -3,9 +3,8 @@ import { spawn, execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
-import { ROOT } from '../scanner/scan.js';
-import { runChoice, cleanEnv } from './claude.js';
-import { routerInput } from './plans.js';
+import { ROOT } from './config.js';
+import { runChoice, cleanEnv, routerInput } from './claude.js';
 
 export const PROVIDERS = ['claude', 'codex'];
 export function providerOf(value = 'claude') {
@@ -129,4 +128,65 @@ export async function runDecision(prompt, text, schema, options = {}) {
     emit({ kind: 'error', text: err.message });
     throw err;
   }
+}
+
+
+const CODEX_CHAT_DISABLED = ['apps', 'multi_agent', 'plugins', 'remote_plugin', 'hooks', 'browser_use', 'computer_use', 'image_generation',
+  'default_mode_request_user_input', 'view_image', 'goals', 'sleep_tool', 'tool_suggest', 'multi_agent_v2', 'request_permissions_tool', 'skill_mcp_dependency_install'];
+const clip = (t, n) => String(t ?? '').slice(0, n);
+
+/** A real Codex turn in the project's own folder: read-only sandbox (it can read and search files and run read-only
+ *  shell commands, never write or reach the network), the project's AGENTS.md/skills are visible, the thread persists
+ *  so the next turn resumes it. Resolves with { reply, sessionId }. */
+export async function runCodexChat(prompt, text, { cwd, sessionId = null, persist = true, timeoutMs = 300_000, onEvent = () => {} } = {}) {
+  if (sessionId && !/^[\da-f-]{36}$/i.test(sessionId)) throw new Error('Geçersiz CLI oturum kimliği.');
+  const base = join(ROOT, 'data', 'cli');
+  mkdirSync(base, { recursive: true });
+  const dir = mkdtempSync(join(base, 'chat-'));
+  try {
+    const bin = process.env.DESK_CODEX_BIN || 'codex';
+    const env = cleanEnv();
+    for (const k of Object.keys(env)) if (/^(OPENAI_|AZURE_OPENAI_|CODEX_API_KEY$)/.test(k)) delete env[k];
+    const catalogPath = join(dir, 'models.json');
+    writeFileSync(catalogPath, JSON.stringify(await catalogFor(bin, env)), { mode: 0o600 });
+    const args = ['exec', '--ignore-user-config', ...(persist ? [] : ['--ephemeral']), '--sandbox', 'read-only', '--json',
+      '-c', `model_catalog_json=${JSON.stringify(catalogPath)}`, '-c', 'approval_policy="never"', '-c', 'mcp_servers={}',
+      '-c', 'web_search="disabled"', '-c', 'model_reasoning_effort="medium"',
+      ...CODEX_CHAT_DISABLED.flatMap((f) => ['--disable', f])];
+    if (sessionId) args.push('resume', sessionId);
+    args.push('-');
+    onEvent({ kind: 'status', text: `codex exec ${sessionId ? 'resume ' : ''}· salt-okunur sandbox, ağ kapalı` });
+    return await new Promise((resolve, reject) => {
+      const child = spawn(/\.(mjs|js|cjs)$/.test(bin) ? process.execPath : bin, /\.(mjs|js|cjs)$/.test(bin) ? [bin, ...args] : args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      let buffer = '', stderr = '', answer = '', thread = sessionId, size = 0, failed = false;
+      const timer = setTimeout(() => { child.kill('SIGTERM'); reject(new Error('Codex zaman aşımına uğradı.')); }, timeoutMs);
+      child.stdout.on('data', (chunk) => {
+        size += chunk.length;
+        if (size > 4_000_000) { failed = true; child.kill('SIGTERM'); return; }
+        buffer += chunk;
+        const lines = buffer.split('\n'); buffer = lines.pop();
+        for (const line of lines) {
+          try {
+            const e = JSON.parse(line);
+            if (e.type === 'thread.started' && /^[\da-f-]{36}$/i.test(e.thread_id ?? '')) thread = e.thread_id;
+            if (e.type === 'error' || e.type === 'turn.failed') { failed = true; stderr = e.message ?? e.error?.message ?? 'Codex hata verdi.'; }
+            if (e.type === 'item.started' && e.item?.type === 'command_execution') onEvent({ kind: 'status', text: `komut: ${clip(e.item.command, 200)}` });
+            if (e.type === 'item.completed' && e.item?.type === 'agent_message') answer = e.item.text;
+            // the sandbox should prevent these; if one still shows up, end the turn
+            if (e.item && ['file_change', 'mcp_tool_call', 'web_search'].includes(e.item.type)) { failed = true; stderr = 'İzin verilmeyen araç isteği.'; child.kill('SIGTERM'); }
+          } catch { /* non-event diagnostic */ }
+        }
+      });
+      child.stderr.on('data', (c) => { stderr = (stderr + c).slice(-2000); });
+      child.once('error', (err) => { clearTimeout(timer); reject(new Error(`Codex başlatılamadı: ${err.message}`)); });
+      child.once('close', (code) => {
+        clearTimeout(timer);
+        if (code !== 0 || failed || !answer.trim()) return reject(new Error(`Codex: ${stderr.trim().slice(-400) || 'Yanıt üretilemedi.'}`));
+        onEvent({ kind: 'output', text: clip(answer, 6000) });
+        resolve({ reply: clip(answer, 12000), sessionId: thread });
+      });
+      child.stdin.on('error', () => {});
+      child.stdin.end(`${prompt}\n\nKullanıcı mesajı:\n${text}`);
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 }

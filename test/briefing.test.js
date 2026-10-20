@@ -19,13 +19,14 @@ test('MCP exposes only the bounded public briefing tool and validates arguments'
 });
 test('public feeds are cached and weather is requested only for a supplied location, without exposing coordinates in results', async () => {
   const urls=[];
-  const fetcher=async url=>{urls.push(url); return new Response(url.includes('/forecast')?JSON.stringify({current:{temperature_2m:16,weather_code:61,precipitation:1}}):`<rss>${item()}</rss>`);};
+  const fetcher=async url=>{urls.push(url); return new Response(url.includes('/forecast')?JSON.stringify({timezone:'Europe/Istanbul',current:{temperature_2m:16,apparent_temperature:14,relative_humidity_2m:70,wind_speed_10m:12,weather_code:61,precipitation:1},daily:{sunrise:['2026-10-20T06:42'],sunset:['2026-10-20T17:58'],temperature_2m_max:[18],temperature_2m_min:[11]}}):url.includes('reverse-geocode')?JSON.stringify({city:'İstanbul',principalSubdivision:'İstanbul',countryName:'Türkiye'}):`<rss>${item()}</rss>`);};
   const b=createBriefing({dataDir:tmp(),now:()=>at,fetcher});
   assert.equal((await b.get({topic:'science'})).sources.length,1);
   await b.get({topic:'science'});assert.equal(urls.length,1);
   const weather=await b.get({topic:'science',latitude:41,longitude:29});
-  assert.equal(weather.sources.length,2);assert.equal(urls.length,2);
+  assert.equal(weather.sources.length,2);assert.equal(urls.length,3);
   assert.ok(weather.sources[1].title.includes('16 °C'));
+  assert.deepEqual(weather.sources[1].weather,{temperature:16,code:61,precipitation:1,feels:14,humidity:70,wind:12,high:18,low:11,sunrise:'06:42',sunset:'17:58',timezone:'Europe/Istanbul',city:'İstanbul',region:'İstanbul',country:'Türkiye'});
   assert.ok(!JSON.stringify(weather).includes('latitude'));
   await assert.rejects(()=>b.get({topic:'http://127.0.0.1'}),/invalid-topic/);
 });

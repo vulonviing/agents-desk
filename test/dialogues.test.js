@@ -165,3 +165,35 @@ test('news batches only get fitting sources: AI, politics and tech each see thei
   assert.equal(ids('roles').length, 5);
   assert.deepEqual(FOCUS.map((f) => f.key), ['life', 'ai', 'politics', 'tech', 'roles']);
 });
+
+test('English mirrors: kept when valid, dropped when unsafe or one-sided, and legacy lines are translated through the shared queue', async () => {
+  const lines = validateLines([
+    { kind: 'desk', text: 'Yarın için not alayım.', textEn: 'Let me jot a note for tomorrow.' },
+    { kind: 'desk', text: 'Bir not daha alayım.', textEn: 'See https://x.example' }, // unsafe mirror: the Turkish line stays
+    { kind: 'visit', text: 'Kahve?', reply: 'Olur.', followUp: 'Ne içiyoruz?', answer: 'Filtre.', textEn: 'Coffee?', replyEn: 'Sure.', followUpEn: 'What are we having?', answerEn: 'Filter.' },
+    { kind: 'visit', text: 'Su?', reply: 'Evet.', textEn: 'Water?' }, // visit mirror without a reply is dropped
+  ]);
+  assert.deepEqual(lines.map((l) => l.en?.text ?? null), ['Let me jot a note for tomorrow.', null, 'Coffee?', null]);
+  assert.equal(lines[2].en.answer, 'Filter.');
+  assert.ok(BUILTIN.length > 0);
+
+  const dataDir = tmp();
+  let calls = 0;
+  const dlg = createDialogues({
+    dataDir,
+    config: () => ({ dialogues: { batchesPerRefresh: 1 } }),
+    run: async (system, input) => { calls++; assert.match(system, /translate/i); const items = JSON.parse(input); return { items: items.map(({ i, text, reply }) => ({ i, text: `EN ${text}`, ...(reply ? { reply: `EN ${reply}` } : {}) })) }; },
+  });
+  // seed a legacy pool through the public API: refresh() is not needed, translate() works on what load() finds on disk
+  const { writeFileSync, mkdirSync } = await import('node:fs');
+  mkdirSync(join(dataDir, 'dialogues'), { recursive: true });
+  writeFileSync(join(dataDir, 'dialogues', 'lab.json'), JSON.stringify({ version: 11, updatedAt: Date.now(), lines: [{ kind: 'desk', text: 'Masam dağınık.' }, { kind: 'visit', text: 'Kahve?', reply: 'Olur.' }] }));
+  assert.equal(dlg.status().pools.length, 0);
+  assert.equal(await dlg.translate('lab'), true);
+  const pool = dlg.get('lab', null);
+  const desk = pool.lines.find((l) => l.text === 'Masam dağınık.');
+  assert.equal(desk.en.text, 'EN Masam dağınık.');
+  assert.equal(pool.lines.find((l) => l.kind === 'visit' && l.text === 'Kahve?').en.reply, 'EN Olur.');
+  assert.equal(await dlg.translate('lab'), false, 'nothing left to translate: no further model call');
+  assert.equal(calls, 1);
+});

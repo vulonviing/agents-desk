@@ -2,6 +2,7 @@
 import { readFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { structureNews } from './news-taxonomy.js';
 // Public feeds by topic. Every feed names the hosts its links may point to; nothing else is ever followed.
 const BBC = ['www.bbc.com', 'www.bbc.co.uk', 'bbc.com', 'bbc.co.uk'];
 export const FEEDS = {
@@ -44,7 +45,7 @@ export function parseFeed(xml, topic, now = Date.now(), source = feedsOf(topic)[
     const title = clean(tag('title'), 150), url = clean(tag('link'), 300), publishedAt = Date.parse(tag('pubDate') ?? tag('dc:date') ?? '');
     if (!title || !Number.isFinite(publishedAt) || publishedAt > now + 300_000 || now - publishedAt > 48 * 3_600_000) return [];
     try { const u = new URL(url); if (u.protocol !== 'https:' || u.username || u.password || !source.hosts.includes(u.hostname)) return []; } catch { return []; }
-    return [{ id: `${topic}:${createHash('sha256').update(url).digest('hex').slice(0, 10)}:${i}`, kind: 'news', topic, publisher: source.name, title, url, publishedAt, expiresAt: Math.min(publishedAt + 48 * 3_600_000, now + 6 * 3_600_000) }];
+    return [{ id: `${topic}:${createHash('sha256').update(url).digest('hex').slice(0, 10)}:${i}`, kind: 'news', topic, publisher: source.name, title, description: clean(tag('description'), 400), url, publishedAt, expiresAt: Math.min(publishedAt + 48 * 3_600_000, now + 6 * 3_600_000) }];
   }).slice(0, 4);
 }
 
@@ -60,7 +61,7 @@ export function parseSearchFeed(xml, role, now = Date.now()) {
       if(u.protocol!=='https:'||u.username||u.password||!u.hostname.includes('.')||/[\[\]:]/.test(u.hostname)||/^\d+\.\d+\.\d+\.\d+$/.test(u.hostname)||/\.(local|internal|localhost)$/.test(u.hostname))return [];
       url=u.href;
     }catch{return [];}
-    return [{id:'search:'+createHash('sha256').update(url).digest('hex').slice(0,16),kind:'news',publisher:clean(tag('News:Source'),60)||'Bing News',title,url,publishedAt,expiresAt:Math.min(publishedAt+48*3600000,now+6*3600000),role}];
+    return [{id:'search:'+createHash('sha256').update(url).digest('hex').slice(0,16),kind:'news',publisher:clean(tag('News:Source'),60)||'Bing News',title,description:clean(tag('description'),400),url,publishedAt,expiresAt:Math.min(publishedAt+48*3600000,now+6*3600000),role}];
   }).slice(0,3);
 }
 
@@ -100,18 +101,35 @@ export function createBriefing({ dataDir, fetcher = fetch, now = Date.now }) {
     const searches=await Promise.all(all.map(async item=>{
       if(typeof item?.query!=='string'||item.query.length>100||!/^[\p{L}\p{N} '\-]+$/u.test(item.query))return [];
       const key='search-'+createHash('sha256').update(item.query).digest('hex').slice(0,24);
-      return (await cached(key,6*3600000,async()=>parseSearchFeed(await download('https://www.bing.com/news/search?format=rss&qft=interval%3D%227%22&setlang=en-US&q='+encodeURIComponent(item.query),fetcher),undefined,now()))).map(s=>({...s,role:clean(item.role,60),query:item.query}));
+      return (await cached(key,6*3600000,async()=>parseSearchFeed(await download('https://www.bing.com/news/search?format=rss&qft=interval%3D%227%22&setlang=en-US&q='+encodeURIComponent(item.query),fetcher),undefined,now()))).map(s=>structureNews({...s,role:clean(item.role,60),query:item.query,topic:item.topic,tags:item.tags}));
     }));
     let weather = [];
-    if (hasLocation(latitude, longitude) || typeof city === 'string' && city.trim() && city.length <= 80) weather = await cached('weather-' + Buffer.from(city || `${latitude},${longitude}`).toString('hex'), 60 * 60_000, async () => {
+    if (hasLocation(latitude, longitude) || typeof city === 'string' && city.trim() && city.length <= 80) weather = await cached('weather3-' + Buffer.from(city || `${latitude},${longitude}`).toString('hex'), 60 * 60_000, async () => {
       const geo = city ? JSON.parse(await download('https://geocoding-api.open-meteo.com/v1/search?count=1&language=tr&name=' + encodeURIComponent(city), fetcher)) : { results: [{ latitude, longitude, name: 'Yakın çevreniz' }] };
       const place = geo.results?.[0];
       if (!place || !Number.isFinite(place.latitude) || !Number.isFinite(place.longitude)) return [];
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,precipitation,weather_code&timezone=auto`;
-      const data = JSON.parse(await download(url, fetcher)), c = data.current;
+      // the city of a (rounded) location: one public reverse-geocoding call; failure keeps the generic name
+      let where = { city: clean(place.name, 60), region: clean(place.admin1, 60), country: clean(place.country, 60) };
+      if (!city) {
+        try {
+          const r = JSON.parse(await download(`https://api-bdc.io/data/reverse-geocode-client?latitude=${place.latitude}&longitude=${place.longitude}&localityLanguage=tr`, fetcher));
+          where = { city: clean(r.city || r.locality, 60) || where.city, region: clean(r.principalSubdivision, 60), country: clean(r.countryName, 60) };
+        } catch { /* generic name */ }
+      }
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&daily=sunrise,sunset,temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto`;
+      const data = JSON.parse(await download(url, fetcher)), c = data.current, d = data.daily ?? {};
       if (!Number.isFinite(c?.temperature_2m) || !Number.isFinite(c?.weather_code)) return [];
-      return [{ id: 'weather:' + now(), kind: 'weather', publisher: 'Open-Meteo', title: `${clean(place.name, 60)}: ${c.temperature_2m} °C, WMO ${c.weather_code}, yağış ${c.precipitation ?? 0} mm`, url: 'https://open-meteo.com/', publishedAt: now(), expiresAt: now() + 2 * 3_600_000 }];
+      const num = (v) => (Number.isFinite(v) ? v : undefined);
+      const hhmm = (v) => (typeof v === 'string' && /T(\d\d:\d\d)/.test(v) ? v.match(/T(\d\d:\d\d)/)[1] : undefined);
+      const weatherInfo = Object.fromEntries(Object.entries({
+        temperature: c.temperature_2m, code: c.weather_code, precipitation: c.precipitation ?? 0,
+        feels: num(c.apparent_temperature), humidity: num(c.relative_humidity_2m), wind: num(c.wind_speed_10m),
+        high: num(d.temperature_2m_max?.[0]), low: num(d.temperature_2m_min?.[0]), sunrise: hhmm(d.sunrise?.[0]), sunset: hhmm(d.sunset?.[0]),
+        timezone: typeof data.timezone === 'string' && /^[A-Za-z_\/+-]{1,40}$/.test(data.timezone) ? data.timezone : undefined,
+        city: where.city || undefined, region: where.region || undefined, country: where.country || undefined,
+      }).filter(([, v]) => v !== undefined));
+      return [{ id: 'weather:' + now(), kind: 'weather', publisher: 'Open-Meteo', title: `${where.city || 'Yakın çevreniz'}: ${c.temperature_2m} °C, WMO ${c.weather_code}, yağış ${c.precipitation ?? 0} mm`, url: 'https://open-meteo.com/', publishedAt: now(), expiresAt: now() + 2 * 3_600_000, weather: weatherInfo }];
     });
-    return { at: now(), sources: [...searches.flat(), ...sources, ...weather] };
+    return { at: now(), sources: [...searches.flat().filter(Boolean), ...sources.map(structureNews).filter(Boolean), ...weather] };
   } };
 }

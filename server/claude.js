@@ -1,5 +1,34 @@
 import { spawn } from 'node:child_process';
-import { PLAN_SCHEMA, extractPlanJson, routerInput, routerPrompt } from './plans.js';
+
+
+const clip = (s, n) => {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  return t.length > n ? t.slice(0, n - 1) + '…' : t;
+};
+
+// What goes to a decision call's stdin: the user's text, fenced so it cannot close the fence.
+export const routerInput = (text) => `<görev>\n${String(text).replaceAll('</görev>', '< /görev>')}\n</görev>`;
+
+// `claude --output-format json` prints one JSON object; the answer is in structured_output or in the result text.
+export function extractPlanJson(stdout) {
+  let out;
+  try {
+    out = JSON.parse(stdout);
+  } catch {
+    throw new Error('Yönetici çıktısı okunamadı.');
+  }
+  if (out?.is_error) throw new Error(`Yönetici hata verdi: ${clip(out.result, 200)}`);
+  if (out?.structured_output && typeof out.structured_output === 'object') return out.structured_output;
+  const text = String(out?.result ?? '').replace(/```(?:json)?/g, '');
+  const from = text.indexOf('{');
+  const to = text.lastIndexOf('}');
+  if (from < 0 || to <= from) throw new Error('Yönetici bir yanıt üretmedi.');
+  try {
+    return JSON.parse(text.slice(from, to + 1));
+  } catch {
+    throw new Error('Yöneticinin yanıtı geçerli JSON değil.');
+  }
+}
 
 // Starting the Claude Code CLI. DESK_CLAUDE_BIN swaps the binary (tests use a fake one).
 
@@ -18,46 +47,6 @@ export function cleanEnv(extra = {}) {
 export function spawnClaude(args, { cwd, env }) {
   const { cmd, args: full } = claudeCommand(args);
   return spawn(cmd, full, { cwd, env: cleanEnv(env), stdio: ['pipe', 'pipe', 'pipe'] });
-}
-
-export const ROUTER_TOOLS = 'Read,Grep,Glob';
-
-export function routerArgs(room) {
-  return [
-    '-p', '--output-format', 'json', '--json-schema', JSON.stringify(PLAN_SCHEMA),
-    '--restricted', '--tools', ROUTER_TOOLS, '--permission-prompts', 'none', '--no-session-persistence', '--strict-mcp-config',
-    '--append-system-prompt', routerPrompt(room),
-  ];
-}
-
-// Runs the read-only router in the project's folder and resolves with the raw plan object.
-export function runRouter(room, text, { timeoutMs = 180_000 } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawnClaude(routerArgs(room), { cwd: room.path });
-    let out = '';
-    let err = '';
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error('Yönlendirici zaman aşımına uğradı.'));
-    }, timeoutMs);
-    child.stdout.on('data', (c) => (out += c));
-    child.stderr.on('data', (c) => (err = (err + c).slice(-2000)));
-    child.on('error', (e) => {
-      clearTimeout(timer);
-      reject(new Error(`claude başlatılamadı: ${e.message}`));
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code !== 0 && !out.trim()) return reject(new Error(`Yönlendirici çıkış kodu ${code}: ${err.trim().slice(0, 200)}`));
-      try {
-        resolve(extractPlanJson(out));
-      } catch (e) {
-        reject(e);
-      }
-    });
-    child.stdin.on('error', () => {});
-    child.stdin.end(routerInput(text));
-  });
 }
 
 // A manager's decision: picks one id from a list. No tools at all.

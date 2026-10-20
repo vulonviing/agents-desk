@@ -1,79 +1,5 @@
 {
-  "roots": [
-    "~/Documents"
-  ],
-  "exclude": [
-    "agents-desk"
-  ],
   "port": 4317,
-  "dust": {
-    "light": 14,
-    "medium": 45,
-    "heavy": 120
-  },
-  "lamp": {
-    "activeDays": 1,
-    "weekDays": 7
-  },
-  "sessions": {
-    "projectsDir": "~/.claude/projects",
-    "liveMinutes": 10
-  },
-  "defaultFloor": "products",
-  "floors": [
-    {
-      "id": "products",
-      "name": "Ürünler"
-    },
-    {
-      "id": "research",
-      "name": "Araştırma"
-    },
-    {
-      "id": "growth",
-      "name": "Kişisel Gelişim"
-    }
-  ],
-  "assignments": {
-    "Agents Extension": "products",
-    "agents-deck": "products",
-    "agents-deck-public": "products",
-    "mahur": "products",
-    "open-volume-booster": "products",
-    "emrecan-vps": "products",
-    "sources-check": "products",
-    "Mini Finance Dashboard": "products",
-    "TeamSquadpy": "products",
-    "Siemens Thesis": "research",
-    "epoch": "research",
-    "ccu": "research",
-    "community-notes-x-rescue-main": "research",
-    "cross-constituency-aggregation-community-notes": "research",
-    "media-bias-pipeline": "research",
-    "paperhub": "research",
-    "science-slam-com-notes": "research",
-    "seds science slam": "research",
-    "Statistical Learning Project 2026": "research",
-    "nazmi-tez-asistani": "research",
-    "Portfolio": "growth",
-    "interview-assistant": "growth",
-    "cv-checker": "growth",
-    "Emrecan CV": "growth",
-    "normalcy-axis": "research"
-  },
-  "embed": {
-    "Emrecan CV": [
-      "DIL Application"
-    ]
-  },
-  "levels": {
-    "default": "plan",
-    "emrecan-vps": "read-only",
-    "Emrecan CV": "approve"
-  },
-  "include": [
-    "normalcy-axis-project/normalcy-axis"
-  ],
   "dialogues": {
     "enabled": true,
     "model": "latest-flash",
@@ -89,5 +15,29 @@
     "effort": "medium",
     "batchesPerRefresh": 5,
     "warmAll": true
-  }
+  },
+  "desks": [
+    {
+      "id": "emrecan-cv",
+      "name": "Emrecan CV",
+      "path": "~/Documents/Emrecan CV",
+      "coordinator": "Başvuru Koordinatörü",
+      "description": "Başvuru hattı: ilan topla/filtrele, CV ve cover letter hazırla, derle, son kontrol.",
+      "topic": "business",
+      "concept": "başvuru kulisi, ilan filtreleme, anlatım kliniği",
+      "coordinatorEn": "Application Coordinator",
+      "descriptionEn": "Application pipeline: collect and filter postings, prepare the CV and cover letter, build, final check."
+    },
+    {
+      "id": "cv-checker",
+      "name": "cv-checker",
+      "path": "~/Documents/cv-checker",
+      "coordinator": "CV Kontrol Koordinatörü",
+      "description": "CV'ni yükle, yapılandırılmış bir değerlendirme raporu al.",
+      "topic": "business",
+      "concept": "CV eleştirisi, dürüst geri bildirim, tasarım gözü",
+      "coordinatorEn": "CV Check Coordinator",
+      "descriptionEn": "Drop in your CV and get a structured evaluation report."
+    }
+  ]
 }

@@ -3,36 +3,22 @@ import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSyn
 import { randomUUID } from 'node:crypto';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROOT, levelFor, loadConfig, scan, writeProjects } from '../scanner/scan.js';
-import { loadManifest } from '../scanner/manifest.js';
-import { scanSessions } from '../scanner/sessions.js';
-import { scanActivity } from '../scanner/activity.js';
-import { createObserver } from '../scanner/observer.js';
-import { createActivityWatch } from '../scanner/watch.js';
-import { validatePlan } from './plans.js';
-import { runRouter } from './claude.js';
-import { createRunner } from './runner.js';
-import { listSessions, readConversation } from './transcripts.js';
-import { buildAgents, summarize } from './agents.js';
-import { createChats, findAgent } from './chat.js';
+import { ROOT, loadConfig, loadDesks } from './config.js';
+import { buildCoordinators, FLOOR_ID, VARIANTS } from './desks.js';
+import { createChats } from './chat.js';
+import { createNewsFeedback } from './news-feedback.js';
+import { createNewsBoard } from './news-board.js';
 import { createDialogueCreator } from './dialogue-creator.js';
 import { createDialogues } from './dialogues.js';
 import { resumeCommand } from './resume.js';
 import { getBriefing } from './briefing-client.js';
 import { createAntigravityRunner } from './antigravity.js';
-import { CHOICE_SCHEMA, choicePrompt, findManager, managerChatPrompt, managerDefs, optionsFor, pickTarget } from './managers.js';
-import { runDecision, providerOf } from './llm.js';
-import { routerPrompt, PLAN_SCHEMA } from './plans.js';
-import { createCoordinators } from './coordinators.js';
-import { VARIANTS } from './agents.js';
+import { providerOf } from './llm.js';
+import { createUsage } from './usage.js';
 
-const LEGACY_OFFICE = join(ROOT, 'office');
-const APP_DIST = join(ROOT, 'app', 'dist');
-// The built app (Phaser + React) is served when it exists; the previous canvas UI stays as a fallback.
-const staticRoot = () => (existsSync(join(APP_DIST, 'index.html')) ? APP_DIST : LEGACY_OFFICE);
+const OFFICE_DIR = join(ROOT, 'office', 'public');
 const TYPES = {
   '.png': 'image/png',
-  '.map': 'application/json',
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -75,97 +61,14 @@ function readJson(req, limit = 64 * 1024) {
   });
 }
 
-// deps are injectable so tests can run against fixtures: { dataDir, manifestDir, loadConfig, projects }
+// deps are injectable so tests can run against fixtures: { dataDir, loadConfig, briefing, warmDialogues }
 export function createDeskServer(deps = {}) {
   const dataDir = deps.dataDir ?? join(ROOT, 'data');
-  const manifestDir = deps.manifestDir ?? join(ROOT, 'projects');
   const config = deps.loadConfig ?? loadConfig;
-  const projectsFile = join(dataDir, 'projects.json');
+  const desks = () => loadDesks(config());
+  const getDesk = (id) => desks().find((d) => d.id === id) ?? null;
 
-  const rescan = () => {
-    const data = scan(config(), Date.now(), manifestDir);
-    writeProjects(data, projectsFile);
-    return data;
-  };
-  const readProjects = deps.projects ?? (() => (existsSync(projectsFile) ? JSON.parse(readFileSync(projectsFile, 'utf8')) : rescan()));
-
-  // Transcript scans are incremental thanks to the cache; the result is reused for a few seconds.
-  const activityCache = new Map();
-  let activityMemo = { at: 0, value: null };
-  const readActivity = () => {
-    if (Date.now() - activityMemo.at > 4000 || !activityMemo.value) {
-      activityMemo = { at: Date.now(), value: scanActivity(readProjects(), config(), Date.now(), activityCache) };
-    }
-    return activityMemo.value;
-  };
-
-  // A room with its level re-resolved from the current config, so a changed level applies immediately.
-  const getRoom = (id) => {
-    const room = readProjects().floors.flatMap((f) => f.rooms).find((r) => r.id === id);
-    if (!room) return null;
-    return { ...room, level: levelFor(config(), room.name, room.id, loadManifest(room.id, manifestDir).manifest) };
-  };
-
-  // ---------- the office snapshot: agents + live sessions + station activity ----------
-  const observer = createObserver();
-  const coordinators = createCoordinators();
-  const localObservations = [];
-  const runStations = {};
-  let dispatching = false;
-  let lastSnapshot = null;
-  const snapshot = () => {
-    const data = readProjects();
-    const observed = observer.poll(data, config());
-    const live = scanSessions(data, config()).live;
-    for (const [id, session] of Object.entries(observed.live)) if (!live[id] || session.ageSec <= live[id].ageSec + 2) live[id] = session;
-    const activity = readActivity();
-    const runSnap = runner.snapshot();
-    const residents = buildAgents({ data, live, activity, observedSessions: observed.sessions ?? [], runs: runSnap.runs, runStations, plans: Object.fromEntries(plans), now: Date.now() });
-    const agents = coordinators.build(data, residents, observed.sessions ?? [], id => chats.state(id));
-    const managers = managerDefs(data).map((m, i) => ({ ...m, variant: VARIANTS[(i * 5 + 3) % VARIANTS.length], status: dispatching ? 'thinking' : 'idle', offices: data.floors.reduce((n, f) => n + f.rooms.length, 0) }));
-    armExpiry(observed, live, activity, runSnap);
-    return lastSnapshot = { at: new Date().toISOString(), sessions: observed.sessions ?? [], summary: summarize(agents), agents, managers, live, activity, observations: [...observed.events, ...localObservations.filter(e => Date.now() - Date.parse(e.at) < 120_000)] };
-  };
-  let lastOffice = '';
-  let refreshTimer = null, expiryTimer = null;
-  const pushOffice = () => {
-    if (!clients.size) return;
-    const snap = snapshot();
-    const { at, ...rest } = snap;
-    const sig = JSON.stringify(rest);
-    if (sig === lastOffice) return;
-    lastOffice = sig;
-    emit('office', snap);
-  };
-  const soon = () => {
-    clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(pushOffice, 120);
-  };
-  // Only age transitions schedule a one-shot wakeup; filesystem changes drive normal refreshes.
-  const armExpiry = (observed, live, activity, runSnap) => {
-    clearTimeout(expiryTimer);
-    const now = Date.now(), deadlines = [];
-    const add = t => { if (Number.isFinite(t) && t > now + 10) deadlines.push(t); };
-    for (const s of observed.sessions ?? []) for (const age of [30_000, 120_000, (config().sessions?.liveMinutes ?? 10) * 60_000]) add(s.at + age);
-    for (const s of Object.values(live)) for (const age of [15_000, 120_000, 600_000]) add(now - s.ageSec * 1000 + age);
-    for (const event of observed.events) add(Date.parse(event.at) + 120_000);
-    for (const room of Object.values(activity.rooms)) for (const station of Object.values(room)) add(Date.parse(station.lastAt) + 120_000);
-    for (const run of runSnap.runs) add(Date.parse(run.endedAt) + (run.state === 'done' ? 8000 : 60_000));
-    if (deadlines.length) {
-      expiryTimer = setTimeout(() => { observer.invalidate(); pushOffice(); }, Math.max(20, Math.min(...deadlines) - now + 20));
-      expiryTimer.unref();
-    }
-  };
-  const activityWatch = createActivityWatch(({ skillsChanged }) => {
-    observer.invalidate();
-    activityMemo.at = 0;
-    if (skillsChanged) {
-      const data = rescan();
-      activityWatch.configure(data, config());
-      emit('projects', data);
-    }
-    pushOffice();
-  });
+  const usage = deps.usage ?? createUsage();
 
   // ---------- live events (SSE) ----------
   const clients = new Set();
@@ -178,99 +81,70 @@ export function createDeskServer(deps = {}) {
   }, 20_000);
   heartbeat.unref();
 
-  // The terminal is a bounded, in-memory view of manager CLI calls, separate from project transcripts.
-  const managerCli = [];
-  const cliEvents = (provider, managerId, label) => (event) => {
-    const entry = { id: randomUUID(), at: new Date().toISOString(), provider, managerId, label,
+  // The terminal is a bounded, in-memory view of coordinator CLI calls (status, output, errors; never prompts).
+  const cliLog = [];
+  const cliEvents = (provider, agentId, label) => (event) => {
+    const entry = { id: randomUUID(), at: new Date().toISOString(), provider, managerId: agentId, label,
       kind: event.kind, text: String(event.text ?? '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').slice(0, 6000) };
-    managerCli.push(entry);
-    if (managerCli.length > 200) managerCli.shift();
+    cliLog.push(entry);
+    if (cliLog.length > 200) cliLog.shift();
     emit('manager-cli', entry);
   };
 
-  // ---------- plans and runs ----------
-  const plans = new Map();
-  const routing = new Set();
-  let server;
-  const runner = createRunner({
-    getRoom,
-    emit: (type, payload) => {
-      if (type === 'run' && ['done', 'failed', 'cancelled'].includes(payload.state)) {
-        const p = plans.get(payload.planId);
-        if (p) p.status = payload.state;
-        localObservations.push({ id: randomUUID(), kind: payload.state === 'done' ? 'completed' : 'error', at: new Date().toISOString(), roomId: payload.roomId, provider: 'claude', from: null, to: runStations[payload.roomId] ?? '', file: null, tool: 'run', coordinatorId: `${payload.roomId}#project` });
-        if (localObservations.length > 80) localObservations.shift();
-        delete runStations[payload.roomId];
-      }
-      if (type === 'run-station' && payload.stationId) runStations[payload.roomId] = payload.stationId;
-      emit(type, payload);
-      if (type === 'run' || type === 'run-station' || type === 'approval' || type === 'approval-resolved') soon();
-    },
-    approveUrl: () => `http://127.0.0.1:${server.address().port}/api/permission/request`,
-    dataDir,
+  // ---------- the office snapshot: one coordinator per desk ----------
+  const chats = createChats({ onChange: () => pushOffice(), sessionsFile: deps.sessionsFile ?? join(dataDir, 'chat-sessions.json') });
+  const snapshot = () => ({
+    at: new Date().toISOString(),
+    desks: desks().map(({ id, name, description, descriptionEn, coordinator, coordinatorEn }) => ({ id, name, description, descriptionEn, coordinator, coordinatorEn })),
+    agents: buildCoordinators(desks(), (id) => chats.state(id)),
   });
+  let lastOffice = '';
+  const pushOffice = () => {
+    if (!clients.size) return;
+    const { at, ...rest } = snapshot();
+    const sig = JSON.stringify(rest);
+    if (sig === lastOffice) return;
+    lastOffice = sig;
+    emit('office', { at, ...rest });
+  };
 
-  // Ambient dialogue pools (Antigravity Flash refills them rarely; see server/dialogues.js and the office-dialogues skill)
-  const dialogues = createDialogues({ dataDir, config, creator: createDialogueCreator({dataDir}), run: createAntigravityRunner({ dataDir }), onChange: scope => emit('dialogues', {scope}), briefing: async office => {
-    let location = {}; try { location = JSON.parse(readFileSync(join(dataDir, 'weather-location.json'), 'utf8')); } catch { /* no location permission */ }
-    return (deps.briefing ?? getBriefing)(dataDir, { topics: office.topics ?? [office.topic].filter(Boolean), queries: office.searchQueries ?? [], standing: true, ...location });
-  } });
+  // ---------- ambient dialogue pools (Antigravity Flash refills them rarely; see server/dialogues.js) ----------
+  const newsFeedback = createNewsFeedback({ dataDir });
+  const newsCreator = createDialogueCreator({ dataDir, feedback: newsFeedback.editorial });
+  const readLocation = () => { try { return JSON.parse(readFileSync(join(dataDir, 'weather-location.json'), 'utf8')); } catch { return {}; } };
+  const briefingOf = deps.briefing ?? getBriefing;
+  const dialogues = createDialogues({ dataDir, config, preferences: newsFeedback, creator: newsCreator, run: createAntigravityRunner({ dataDir }), onChange: (scope) => emit('dialogues', { scope }),
+    briefing: async (office) => briefingOf(dataDir, { topics: office.topics ?? [office.topic].filter(Boolean), queries: office.searchQueries ?? [], standing: true, ...readLocation() }) });
   const officeContext = (id) => {
-    const data = readProjects();
-    const floor = data.floors.find((f) => f.rooms.some((r) => r.id === id));
-    const room = floor?.rooms.find((r) => r.id === id);
-    if (!room) return null;
-    const snap = lastSnapshot ?? { agents: room.stations.map(s => ({ roomId: id, deskId: s.id, name: s.skill ?? s.name, role: s.description })), activity: null };
-    const agents = snap.agents.filter((a) => a.roomId === id).slice(0, 24).map((a) => ({ name: a.name, mission: room.stations.find((s) => s.id === a.deskId)?.description || room.readmeSummary || a.role || '' }));
-    const acts = Object.entries(snap.activity?.rooms?.[id] ?? {}).filter(([, v]) => v?.lastAt).sort((x, y) => y[1].lastAt.localeCompare(x[1].lastAt)).map(([sid]) => room.stations.find((s) => s.id === sid)?.name ?? sid);
-    const curator = agents.find(a => /research|collector|source|radar|araştır|ilan|filter/i.test(a.name + ' ' + a.mission)) ?? agents[0];
-    const topic = floor.id === 'research' ? 'science' : floor.id === 'growth' && room.id !== 'portfolio' ? 'business' : room.id === 'mahur' ? 'culture' : 'technology';
-    const concepts = floor.id === 'research' ? 'yöntem tartışması, kanıt tartısı, merak duvarı' : floor.id === 'growth' ? 'başvuru kulisi, mülakat provası, anlatım kliniği, tasarım gözü' : 'prototip kulisi, kullanıcı gözü, tasarım kliniği';
-    return { name: room.name, floor: floor.name, agents, recent: acts, topic, curator: curator?.name, concept: concepts };
-
+    const desk = getDesk(id);
+    if (!desk) return null;
+    const coordinator = desk.coordinator ?? `${desk.name} Koordinatörü`;
+    return { name: desk.name, floor: 'Ofis', agents: [{ name: coordinator, mission: desk.description ?? '' }], recent: [], topic: desk.topic ?? 'technology', curator: coordinator, concept: desk.concept ?? 'masa başı sohbeti, kısa molalar, gündem' };
   };
-  const floorContext = id => {
-    const floor = readProjects().floors.find(f => f.id === id);
-    if (!floor) return null;
-    const agents = floor.rooms.flatMap(room => {
-      const roles = (lastSnapshot?.agents ?? []).filter(a => a.roomId === room.id);
-      const curator = roles.find(a => /research|collector|source|radar|araştır|ilan|filter/i.test(a.name)) ?? roles[0];
-      const specialist = roles.find(a => a.id !== curator?.id && !a.coordinator);
-      return [curator,specialist].filter(Boolean).map(a => ({name:a.name,mission:`${room.name}: ${room.stations.find(s=>s.id===a.deskId)?.description || a.role || ''}`.slice(0,150)}));
-    });
-    return {name:`${floor.name} katı`,floor:floor.name,agents:agents.slice(0,24),recent:[],topic:id==='research'?'science':id==='growth'?'business':'technology',curator:'Ofislerin gündem küratörleri',concept:`${floor.name}: farklı ofislerden meslektaşların karşılaşması, disiplinler arası merak, gündem tartışması, ortak alan hikâyeleri. Ofis farklarını konuştur. En az %70 genel satır olsun.`};
-  };
-  // The dialogue libraries of ALL scopes are kept fresh in the background (three refills a day), one scope at a time.
+  const floorContext = () => ({
+    name: 'Ofis', floor: 'Ofis',
+    agents: desks().map((d) => ({ name: d.coordinator ?? d.name, mission: `${d.name}: ${d.description ?? ''}`.slice(0, 150) })).slice(0, 24),
+    recent: [], topic: 'business', curator: 'Masaların gündem küratörleri',
+    concept: 'Ortak açık ofis: farklı masalardan meslektaşların karşılaşması, disiplinler arası merak, gündem tartışması, pencere önü yorumları. Masa farklarını konuştur. En az %70 genel satır olsun.',
+  });
+  const newsBoard = createNewsBoard({ dataDir, preferences: newsFeedback, editorial: (job) => dialogues.editorial(job), onChange: () => emit('news', {}), collect: async (call) => {
+    const plan = await newsCreator.plan(`floor:${FLOOR_ID}`, floorContext(), call);
+    return briefingOf(dataDir, { topics: ['ai', ...(plan.topics ?? [])].filter((v, i, all) => all.indexOf(v) === i).slice(0, 5), queries: plan.queries ?? [], standing: true });
+  } });
+  // The dialogue libraries of ALL scopes are kept fresh in the background, one scope at a time.
   const warmDialogues = () => {
-    const data = readProjects();
-    const scopes = [...data.floors.flatMap(f => f.rooms.map(r => ({ id: r.id, ctx: officeContext(r.id) }))), ...data.floors.map(f => ({ id: `floor:${f.id}`, ctx: floorContext(f.id) }))];
-    return dialogues.warm(scopes);
+    if (config()?.dialogues?.enabled !== false) void newsBoard.refresh();
+    return dialogues.warm([...desks().map((d) => ({ id: d.id, ctx: officeContext(d.id) })), { id: `floor:${FLOOR_ID}`, ctx: floorContext() }]);
   };
   let warmTimer = null;
   if (deps.warmDialogues) { setTimeout(warmDialogues, 20_000).unref(); warmTimer = setInterval(warmDialogues, 10 * 60_000); warmTimer.unref(); }
-  const chats = createChats({ onChange: event => {
-    if (event.phase === 'delegation') {
-      localObservations.push({ id: randomUUID(), kind: 'activation', at: new Date().toISOString(), roomId: event.roomId, provider: event.provider, from: null, to: event.stationId, tool: 'Skill görevi', file: null, coordinatorId: event.id.slice(event.provider.length + 1) });
-      if (localObservations.length > 80) localObservations.shift();
-    }
-    if (event.phase === 'completed' && event.ok !== undefined && !event.roomId.startsWith('manager:')) {
-      localObservations.push({ id: randomUUID(), kind: event.ok ? 'completed' : 'error', at: new Date().toISOString(), roomId: event.roomId, provider: event.provider, from: null, to: '', file: null, tool: 'chat', coordinatorId: event.id.slice(event.provider.length + 1) });
-      if (localObservations.length > 80) localObservations.shift();
-    }
-    observer.invalidate(); soon();
-  } });
-  const clarifications = new Map();
 
-  const planSummary = (p) => ({ id: p.id, roomId: p.roomId, createdAt: p.createdAt, status: p.status, runId: p.runId, plan: p.plan, text: p.text });
-
-  function savePlan(p) {
-    try {
-      mkdirSync(join(dataDir, 'plans'), { recursive: true });
-      writeFileSync(join(dataDir, 'plans', `${p.id}.json`), JSON.stringify(planSummary(p), null, 2), { mode: 0o600 });
-    } catch {
-      // history is best-effort
-    }
-  }
+  // A chat target: a desk's coordinator, in the project's own folder, read-only.
+  const chatTarget = (id, lang = 'tr') => {
+    const desk = id.endsWith('#project') ? getDesk(id.slice(0, -'#project'.length)) : null;
+    if (!desk) return null;
+    return { room: desk, def: { kind: 'project', key: 'project', name: desk.coordinator ?? desk.name, coordinator: true, lang } };
+  };
 
   async function handleApi(req, res, url) {
     const path = url.pathname;
@@ -278,95 +152,69 @@ export function createDeskServer(deps = {}) {
     let m;
 
     if (method === 'GET') {
-      if ((m = path.match(/^\/api\/managers\/([^/]+)\/terminal$/))) {
-        const id = decodeURIComponent(m[1]);
-        if (!findManager(readProjects(), id)) return fail(res, 404, 'Yönetici bulunamadı.');
-        const provider = providerOf(url.searchParams.get('provider') ?? undefined);
-        return send(res, 200, { entries: managerCli.filter((e) => e.provider === provider && e.managerId === id) });
-      }
+      if (path === '/api/news/feedback') return send(res, 200, newsFeedback.get(url.searchParams.get('sourceId')));
+      if (path === '/api/news/board') return send(res, 200, newsBoard.read());
       if ((m = path.match(/^\/api\/agents\/([^/]+)\/terminal$/))) {
         const id = decodeURIComponent(m[1]);
         const provider = providerOf(url.searchParams.get('provider') ?? undefined);
-        return send(res, 200, { entries: managerCli.filter((e) => e.provider === provider && e.managerId === id) });
+        return send(res, 200, { entries: cliLog.filter((e) => e.provider === provider && e.managerId === id) });
       }
-      if (path === '/api/projects') return send(res, 200, readProjects());
-      if (path === '/api/activity') return send(res, 200, readActivity());
-      if (path === '/api/sessions') return send(res, 200, scanSessions(readProjects(), config()));
       if (path === '/api/office') return send(res, 200, snapshot());
-      if (path === '/api/dialogues/location') {
-        let configured = false; try { const location = JSON.parse(readFileSync(join(dataDir, 'weather-location.json'), 'utf8')); configured = Number.isFinite(location.latitude); } catch { /* unset */ }
-        return send(res, 200, { configured });
+      if (path === '/api/usage') return send(res, 200, await usage.read());
+      if (path === '/api/weather') {
+        // current weather for the window glass; needs the user's location permission, shares nothing else
+        const location = readLocation();
+        if (!Number.isFinite(location?.latitude)) return send(res, 200, { configured: false, weather: null });
+        const result = await briefingOf(dataDir, { ...location }).catch(() => ({ sources: [] }));
+        const weather = result.sources?.find((s) => s.kind === 'weather' && s.weather)?.weather ?? null;
+        return send(res, 200, { configured: true, weather });
       }
-      if (path === '/api/briefing') {
-        const ctx = officeContext(url.searchParams.get('office') ?? '');
-        if (!ctx) return fail(res, 404, 'Ofis bulunamadı.');
-        let location = {}; try { location = JSON.parse(readFileSync(join(dataDir, 'weather-location.json'), 'utf8')); } catch { /* unset */ }
-        const briefing = await (deps.briefing ?? getBriefing)(dataDir, { topic: ctx.topic, ...location }).catch(() => ({ sources: [] }));
-        return send(res, 200, { ...briefing, curator: ctx.curator, concept: ctx.concept });
-      }
+      if (path === '/api/dialogues/location') return send(res, 200, { configured: Number.isFinite(readLocation().latitude) });
       if (path === '/api/dialogues/status') return send(res, 200, dialogues.status());
-      // The command that resumes this coordinator's real CLI session in a terminal (the user pastes it; Desk never types for them).
+      // The command that resumes this coordinator's Desk chat session in a terminal (the user pastes it; Desk never types for them).
       if ((m = path.match(/^\/api\/agents\/([^/]+)\/resume$/))) {
         const id = decodeURIComponent(m[1]);
-        const coordinator = snapshot().agents.find(a => a.id === id && a.coordinator);
-        const room = coordinator ? getRoom(id.split('#')[0]) : null;
-        if (!coordinator || !room) return fail(res, 404, 'Koordinatör bulunamadı.');
-        const attached = coordinator.sessionId ? observer.resolve(coordinator.sessionId) : null;
+        const target = chatTarget(id);
+        if (!target) return fail(res, 404, 'Koordinatör bulunamadı.');
         const chat = chats.state(id);
-        const provider = attached?.provider ?? chat?.provider ?? (url.searchParams.get('provider') === 'codex' ? 'codex' : 'claude');
-        const sessionId = attached?.sessionId ?? (chat?.provider === provider ? chat.sessionId : null) ?? null;
+        const provider = chat?.provider ?? providerOf(url.searchParams.get('provider') ?? undefined);
+        const sessionId = chat?.sessionId ?? null;
         if (!sessionId || !/^[A-Za-z0-9_-]{8,80}$/.test(sessionId)) return fail(res, 404, 'Bu koordinatörün devam edilebilir bir oturumu yok.');
-        const cwd = attached?.cwd ?? room.path;
-        return send(res, 200, { provider, cwd, command: resumeCommand(provider, sessionId, cwd) });
+        return send(res, 200, { provider, cwd: target.room.path, command: resumeCommand(provider, sessionId, target.room.path) });
       }
       if (path === '/api/dialogues') {
         const floorId = url.searchParams.get('floor');
         const scopeId = floorId ?? url.searchParams.get('office') ?? '';
         if (!/^[\w.-]{1,80}$/.test(scopeId)) return fail(res, 400, 'Yer kimliği geçersiz.');
-        const id = floorId ? `floor:${floorId}` : scopeId;
-        const ctx = floorId ? floorContext(floorId) : officeContext(id);
-        if (!ctx) return fail(res, 404, 'Ofis bulunamadı.');
-        return send(res, 200, dialogues.get(id, ctx));
+        const ctx = floorId ? floorContext() : officeContext(scopeId);
+        if (!ctx) return fail(res, 404, 'Masa bulunamadı.');
+        return send(res, 200, dialogues.get(floorId ? `floor:${floorId}` : scopeId, ctx));
       }
-      if (path === '/api/state') return send(res, 200, { ...runner.snapshot(), plans: [...plans.values()].slice(-20).map(planSummary) });
       if (path === '/api/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-content-type-options': 'nosniff' });
         res.write(': connected\n\n');
         clients.add(res);
-        req.on('close', () => { clients.delete(res); if (!clients.size) clearTimeout(expiryTimer); });
+        req.on('close', () => clients.delete(res));
         res.write(`event: office\ndata: ${JSON.stringify(snapshot())}\n\n`);
         return;
-      }
-      if ((m = path.match(/^\/api\/plans\/([\w-]+)$/))) {
-        const p = plans.get(m[1]);
-        return p ? send(res, 200, planSummary(p)) : fail(res, 404, 'Plan bulunamadı.');
       }
       if ((m = path.match(/^\/api\/agents\/([^/]+)\/chat$/))) {
         const id = decodeURIComponent(m[1]);
         return send(res, 200, chats.history(`${providerOf(url.searchParams.get('provider') ?? undefined)}:${id}`));
       }
-      if ((m = path.match(/^\/api\/runs\/([\w-]+)\/log$/))) return runner.get(m[1]) ? send(res, 200, runner.log(m[1])) : fail(res, 404, 'Oturum bulunamadı.');
-      if ((m = path.match(/^\/api\/rooms\/([\w-]+)\/sessions$/))) {
-        const room = getRoom(m[1]);
-        return room ? send(res, 200, await listSessions(room, config())) : fail(res, 404, 'Oda bulunamadı.');
-      }
-      if ((m = path.match(/^\/api\/rooms\/([\w-]+)\/sessions\/([\w.-]+)$/))) {
-        const room = getRoom(m[1]);
-        if (!room) return fail(res, 404, 'Oda bulunamadı.');
-        const conv = await readConversation(room, m[2], config());
-        return conv ? send(res, 200, conv) : fail(res, 404, 'Oturum bulunamadı.');
-      }
       return false;
     }
 
     if (method !== 'POST') return false;
-
-    // The bridge of a running session: no browser, so no Origin; the per-run token is the credential.
-    if (path === '/api/permission/request') {
-      const body = await readJson(req);
-      return send(res, 200, await runner.requestPermission(body));
-    }
     if (!originOk(req)) return fail(res, 403, 'forbidden origin');
+
+    if (path === '/api/news/feedback') {
+      const body = await readJson(req);
+      const result = newsFeedback.set({ sourceId: body.sourceId, value: body.value, reason: body.reason });
+      for (const pool of dialogues.status().pools) emit('dialogues', { scope: pool.id });
+      emit('news', {});
+      return send(res, 200, result);
+    }
 
     if (path === '/api/dialogues/location') {
       const body = await readJson(req);
@@ -383,129 +231,24 @@ export function createDeskServer(deps = {}) {
       return send(res, 200, { configured: true });
     }
 
-    if (path === '/api/rescan') { const data = rescan(); activityWatch.configure(data, config()); observer.invalidate(); emit('projects', data); soon(); return send(res, 200, data); }
-
     if ((m = path.match(/^\/api\/agents\/([^/]+)\/chat(\/reset)?$/))) {
       const id = decodeURIComponent(m[1]);
-      const data = readProjects();
-      const manager = id.startsWith('manager:') ? findManager(data, id) : null;
-      // a manager chats from this repo's folder; everyone else from their project
-      const room = manager ? { id: manager.id, name: manager.name, path: ROOT } : getRoom(id.split('#')[0]);
-      const coordinator = !manager && room ? snapshot().agents.find(a => a.id === id && a.coordinator) : null;
-      const def = manager ? { kind: 'manager', key: manager.id, name: manager.name, prompt: managerChatPrompt(data, manager) } : coordinator ? { kind: 'project', key: id.split('#')[1], name: coordinator.name, coordinator: true } : room ? findAgent(room, id) : null;
-      if (!room || !def) return fail(res, 404, 'Ajan bulunamadı.');
-      const { message, provider: rawProvider } = await readJson(req);
+      const { message, provider: rawProvider, lang: rawLang } = await readJson(req);
+      const target = chatTarget(id, rawLang === 'en' ? 'en' : 'tr');
+      if (!target) return fail(res, 404, 'Ajan bulunamadı.');
       const provider = providerOf(rawProvider);
-      const attached = coordinator?.sessionId ? observer.resolve(coordinator.sessionId) : null;
-      if (attached && attached.provider !== provider) return fail(res, 409, 'Bu koordinatörün oturumu farklı bir CLI kullanıyor. Üst bardan o CLI’ı seç.');
-      if (attached?.state === 'working') return fail(res, 409, 'Bu oturum dışarıdaki CLI’da çalışıyor. Yanıtı tamamlandığında aynı oturumdan devam edebilirsin.');
       const chatId = `${provider}:${id}`;
       if (m[2]) {
         chats.reset(chatId);
+        pushOffice();
         return send(res, 200, { messages: [] });
       }
-      try { return send(res, 200, { messages: await chats.send(attached?.cwd ? { ...room, path: attached.cwd } : room, def, chatId, message, provider, { resumeSessionId: attached?.sessionId, onEvent: cliEvents(provider, id, def.name ?? id) }) }); } finally { observer.invalidate(); soon(); }
-    }
-    if (path === '/api/dispatch') {
-      const body = await readJson(req);
-      const provider = providerOf(body.provider);
-      const entryManagerId = body.managerId ?? 'manager:master';
-      const entryManager = findManager(readProjects(), entryManagerId);
-      if (!entryManager) return fail(res, 404, 'Yönetici bulunamadı.');
-      const text = typeof body.text === 'string' ? body.text.trim() : '';
-      if (text.length < 2 || text.length > 4000) return fail(res, 400, 'Mesaj 2 ile 4000 karakter arasında olmalı.');
-      if (dispatching) return fail(res, 409, 'Bir görev zaten dağıtılıyor.');
-      const previous = body.clarificationId ? clarifications.get(body.clarificationId) : null;
-      if (body.clarificationId && (!previous || previous.provider !== provider || previous.entryManagerId !== entryManagerId)) return fail(res, 400, 'Bu konuşma bulunamadı veya CLI değişti. Master’a yeniden yaz.');
-      if (body.targetId && (!previous || body.reconsider || !previous.options.some((o) => o.id === body.targetId))) return fail(res, 400, 'Yalnızca sunulan seçeneklerden birini seçebilirsin.');
-      const task = previous ? previous.task : text;
-      const context = previous ? `${previous.context}\nYöneticinin sorusu: ${previous.question}\nKullanıcının yanıtı: ${text}` : task;
-      if (context.length > 16000) return fail(res, 400, 'Konuşma çok uzadı. Master’a yeni bir istek yaz.');
-      dispatching = true;
-      soon();
-      try {
-        const data = readProjects();
-        const master = findManager(data, 'manager:master');
-        const reconsider = body.reconsider === true;
-        const route = previous && !reconsider ? [...previous.route] : [];
-        const decide = async (manager) => pickTarget(
-          await runDecision(choicePrompt(data, manager), context, CHOICE_SCHEMA, { provider, onEvent: cliEvents(provider, entryManagerId, manager.name) }), optionsFor(data, manager));
-        const ask = (manager, pick) => {
-          const id = randomUUID();
-          // Bound in-memory continuations; no conversation text is persisted.
-          if (clarifications.size >= 100) clarifications.delete(clarifications.keys().next().value);
-          clarifications.set(id, { provider, task, context, question: pick.clarification.question, entryManagerId, managerId: manager.id, options: pick.clarification.options, route });
-          if (body.clarificationId) clarifications.delete(body.clarificationId);
-          return send(res, 200, { provider, route, plan: null, go: null, clarification: { id, by: manager.name, ...pick.clarification } });
-        };
-        // Offered office choices navigate immediately without another model turn.
-        let officePick;
-        if (body.targetId) {
-          const target = optionsFor(data, master).find(o => o.id === body.targetId);
-          if (!target) return fail(res, 400, 'Bu seçenek artık mevcut değil.');
-          officePick = { target, reason: 'Senin seçimin.' };
-        } else {
-          officePick = await decide(master);
-          if (officePick.clarification) return ask(master, officePick);
-        }
-        route.push({ by: master.name, floorId: officePick.target.floorId, roomId: officePick.target.id, target: officePick.target.name, reason: officePick.reason });
-        if (body.clarificationId) clarifications.delete(body.clarificationId);
-        // The sole master navigates directly; planning remains in the destination office's Task tab.
-        return send(res, 200, { provider, route, plan: null, go: { floorId: officePick.target.floorId, roomId: officePick.target.id } });
-      } catch (err) {
-        cliEvents(provider, entryManagerId, entryManager.name)({ kind: 'error', text: err.message });
-        return fail(res, 502, err.message);
-      } finally {
-        dispatching = false;
-        soon();
-      }
-    }
-    if ((m = path.match(/^\/api\/rooms\/([\w-]+)\/route$/))) {
-      const room = getRoom(m[1]);
-      if (!room) return fail(res, 404, 'Oda bulunamadı.');
-      const { text, provider: rawProvider } = await readJson(req);
-      const provider = providerOf(rawProvider);
-      const task = typeof text === 'string' ? text.trim() : '';
-      if (task.length < 3 || task.length > 4000) return fail(res, 400, 'Görev 3 ile 4000 karakter arasında olmalı.');
-      if (routing.has(room.id)) return fail(res, 409, 'Bu oda için bir plan zaten hazırlanıyor.');
-      routing.add(room.id);
-      try {
-        const plan = validatePlan(provider === 'codex' ? await runDecision(routerPrompt(room), task, PLAN_SCHEMA, { provider }) : await runRouter(room, task), room);
-        const entry = { id: randomUUID(), roomId: room.id, text: task, createdAt: new Date().toISOString(), status: 'ready', runId: null, plan };
-        plans.set(entry.id, entry);
-        savePlan(entry);
-        emit('plan', planSummary(entry));
-        return send(res, 200, planSummary(entry));
-      } catch (err) {
-        return fail(res, 502, err.message);
-      } finally {
-        routing.delete(room.id);
-      }
-    }
-    if ((m = path.match(/^\/api\/plans\/([\w-]+)\/run$/))) {
-      const entry = plans.get(m[1]);
-      if (!entry) return fail(res, 404, 'Plan bulunamadı.');
-      if (entry.status !== 'ready') return fail(res, 409, 'Bu plan zaten çalıştırıldı.');
-      // The plan was validated for the level at planning time; start() checks the current level again.
-      const room = getRoom(entry.roomId);
-      const current = room ? validatePlan({ summary: entry.plan.summary, steps: entry.plan.steps.map((s) => ({ stationId: s.stationId, action: s.action })) }, room) : entry.plan;
-      const run = runner.start(entry.roomId, entry.id, current, entry.text);
-      entry.status = 'running';
-      entry.runId = run.id;
-      entry.plan = current;
-      emit('plan', planSummary(entry));
-      return send(res, 202, run);
-    }
-    if ((m = path.match(/^\/api\/runs\/([\w-]+)\/cancel$/))) return runner.cancel(m[1]) ? send(res, 200, { ok: true }) : fail(res, 409, 'Çalışan bir oturum yok.');
-    if ((m = path.match(/^\/api\/approvals\/([\w-]+)$/))) {
-      const { decision } = await readJson(req);
-      if (decision !== 'allow' && decision !== 'deny') return fail(res, 400, 'decision allow ya da deny olmalı.');
-      return runner.decide(m[1], decision === 'allow') ? send(res, 200, { ok: true }) : fail(res, 404, 'Onay isteği bulunamadı.');
+      return send(res, 200, { messages: await chats.send(target.room, target.def, chatId, message, provider, { onEvent: cliEvents(provider, id, target.def.name) }) });
     }
     return false;
   }
 
-  server = createServer(async (req, res) => {
+  const server = createServer(async (req, res) => {
     if (!hostOk(req)) return fail(res, 403, 'forbidden host');
     const url = new URL(req.url, 'http://localhost');
     try {
@@ -516,24 +259,18 @@ export function createDeskServer(deps = {}) {
       }
       if (req.method !== 'GET') return fail(res, 405, 'method not allowed');
       const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '');
-      const root = staticRoot();
-      const file = resolve(root, normalize(rel));
-      if (!file.startsWith(root + sep) || !existsSync(file) || !statSync(file).isFile()) return fail(res, 404, 'not found');
+      const file = resolve(OFFICE_DIR, normalize(rel));
+      if (!file.startsWith(OFFICE_DIR + sep) || !existsSync(file) || !statSync(file).isFile()) return fail(res, 404, 'not found');
       return send(res, 200, readFileSync(file), TYPES[extname(file)] ?? 'application/octet-stream');
     } catch (err) {
       if (!res.headersSent) return fail(res, err.status ?? 500, String(err.message ?? err));
       res.end();
     }
   });
-  server.on('listening', () => activityWatch.configure(readProjects(), config()));
   server.on('close', () => {
     clearInterval(heartbeat);
     clearInterval(warmTimer);
-    activityWatch.close();
-    clearTimeout(expiryTimer);
-    clearTimeout(refreshTimer);
   });
-  server.runner = runner;
   return server;
 }
 

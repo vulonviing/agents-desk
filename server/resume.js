@@ -6,3 +6,8 @@ export function resumeCommand(provider, sessionId, cwd) {
   const resume = provider === 'codex' ? `codex resume ${sessionId}` : `claude --resume ${sessionId}`;
   return `cd ${shellQuote(cwd)} && ${resume}`;
 }
+
+/** The command that opens a project's own CLI in its folder (archive "bağlan"). Nothing is run by Desk; the user pastes it. */
+export function connectCommand(provider, cwd) {
+  return `cd ${shellQuote(cwd)} && ${provider === 'codex' ? 'codex' : 'claude'}`;
+}

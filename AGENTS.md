@@ -2,55 +2,84 @@
 
 ## Project
 
-Goal: a simulation-style desk that shows and manages every repo and agent in
-`~/Documents`. Fill in architecture and current state here as the project
-takes shape; link to `.agents/` docs for detail instead of inlining it.
-Current runtime and routing contracts: [.agents/architecture.md](.agents/architecture.md).
+One wide pixel-art open office. Every desk is a project folder from `~/Documents`; each desk has one permanent
+coordinator. Clicking a desk (or its character) opens that coordinator's chat, backed by a real, read-only CLI session.
+Colleagues live ambient lives (visiting each other, looking out of the window, coffee, water, LED news) from pooled
+dialogues written by Gemini Flash. Everything is deliberately minimal: more of the office is filled in step by step.
 
-## graphify
+- Back end: `server/` (Node >= 22, ES modules, no npm dependencies). Front end: `office/public/` (vanilla JS canvas, no build step).
+- There is no Master or manager; the office is only desks and their coordinators.
+- Desks are listed in `desk.config.json` → `desks` (`id`, `name`, `path`, `coordinator`, `description`, `topic`, `concept`).
+- The office scene, sprites and LED panel are ported from the studio office of `muratceme/minik-ajanlar`
+  (`sprites.js`, `sfx.js`, `markdown.js` and the pixel routines in `bg.js`/`office.js` are adapted from it).
 
-If `graphify-out/` exists, run `graphify query "<question>"` before browsing or
-grepping source, and `graphify update .` after modifying code. When the user
-types `/graphify`, invoke the `graphify` skill first.
+## Layout of the code
 
-## Skills
+- `server/server.js` — HTTP + SSE; `server/chat.js`, `llm.js`, `claude.js`, `resume.js` — coordinator chat and CLI sessions.
+- `server/dialogues.js`, `dialogue-creator.js`, `antigravity.js`, `briefing*.js`, `news-*.js` — news, dialogue pools, Flash refills, LED board.
+- `office/public/js/i18n.js` (TR/EN), `screens.js` (monitor scenes: Excel, X, Instagram, VS Code, Claude, Codex, sports …),
+  `layout.js` (world, desk slots, spots, the kitchen L), `office.js` (render, camera), `nav.js` (A* walking),
+  `life.js` (ambient director and dialogue pools), `news.js` (LED data, popup, weather), `chat.js` (chat panel), `app.js` (boot).
 
-`.agents/` is the single source of truth for skills and reference docs, shared by
-Claude Code and Codex. Skills live in `.agents/skills/<name>/SKILL.md`; `.claude/skills`
-is a symlink to `../.agents/skills`. Never copy skills into `.claude/`; add new ones
-only under `.agents/skills/` (and re-create the symlink if it is missing). Read a skill
-only when its task comes up; do not load all of them at once. When spawning a subagent,
-name the skills it must use in the prompt.
+## Languages (TR | EN)
 
-### Skill routing (use the skill when the trigger applies)
+- The language switch lives on the cork board (TR | EN) and applies to everything on screen: board, LED, name plates, popups,
+  chat panel, speech bubbles. Chats are told which language to answer in (`lang` in the chat POST).
+- Every pooled dialogue line carries an optional `en` mirror and every news article `titleTr/titleEn/explanation/explanationEn`.
+  Gemini Flash writes both languages in the same call (`server/dialogues.js`, `server/news-board.js`); legacy lines are translated by
+  a bounded backfill (`translate()` via `warm()`) through the same queue and daily budget. Until a line has an English mirror it is
+  shown in Turkish. New UI strings go into `office/public/js/i18n.js` (both languages), never as literals.
 
-| Trigger | Skill (then) |
-|---|---|
-| Decorating any level — floor, office or room: concepts, palettes, materials, wall art, set pieces, room dresses, new decoration sprites | `floor-interior-design` → `visual-qa` |
-| ANY floor-plan, building or office-arrangement change: circulation, access, adjacency, proportions (read first) | `architectural-planning` |
-| Floor plan (central corridor),  entrance/lobby, elevator, floor navigation, Master's office shell, kat → ofis → oda signage | `building-shell` → `visual-qa` |
-| Inside an office: size, type, desk pods/pitch, departments, walls, doors, walkways, where furniture goes | `office-layout-design` (+ `office-art-direction` for looks) → `visual-qa` |
-| How anything looks: palette, wall band, shadows, plates, prop density, reviewing a screenshot | `office-art-direction` |
-| Furniture characters use (coffee, cooler, sofa, printer, board, rack), needs, queues, info-carrying props | `smart-objects` → `visual-qa` |
-| Character states, arriving/leaving, poses, ambient life vs real work, event → animation mapping | `agent-lifecycle` (+ `live-signals` if the source changes) → `visual-qa` |
-| Log watcher/observer, session binding, CLI hooks and installer, signal privacy | `live-signals` |
-| What a coordinator is, binding/resuming real CLI sessions, providers, delegation to skills, coordinator permissions | `coordinator-sessions` |
-| Chat panel with Master/coordinators: layout, streaming, activity cards, Markdown, chat ↔ sim reflection | `chat-experience` → `visual-qa` |
-| Sprites, atlas, `gen-assets`, palette/size rules, licences and credits | `pixel-asset-pipeline` |
-| Tiled JSON, layers, collision, depth, GIDs, map tests | `tiled-map-pipeline` |
-| Day/night, ambient props, rare events, effects | `office-atmosphere` → `visual-qa` |
-| Ambient talk (coffee, news, visits), dialogue pool, Antigravity Flash refill, quota and token budget | `office-dialogues` → `visual-qa` |
-| React UI: HUD, toolbar, dock, chat rendering, tooltips, mobile, accessibility | `office-ui-hud` → `visual-qa` |
+## Coordinator chats (hard rule)
 
-**Hard rule:** any visual or game change (layout, sprites, furniture, characters, signs, HUD,
-camera, lifecycle) is not "done" until `visual-qa` has run (Playwright screenshots, checklist,
-performance sample) and its report states what was and was not checked. Unit tests alone
-never close a visual change.
+- **One session per coordinator chat.** Every message resumes the same CLI session until the user presses "Yeni konuşma";
+  switching CLI switches the thread and never resets one.
+- "Resume kopyala" copies `cd '<project>' && claude --resume <id>` / `codex resume <id>`; the user pastes it in their own
+  terminal. This explicit click (`GET /api/agents/:id/resume`) is the only way a real session id leaves the server.
+- **No embedded terminal.** Never add PTY/xterm code or `node-pty`; Desk never hosts a full-capability CLI session.
+- Coordinator chats run in the project's own folder, read-only. Claude: `-p --restricted` with Read/Grep/Glob/Skill.
+  Codex: `codex exec --sandbox read-only` (read/search commands only; no writes, no network, no MCP, no web).
+  Both are told never to open secret files; Codex's sandbox cannot enforce that, so it is prompt-level only.
+- The "CLI çıktısı" toggle shows a bounded log of status/output/errors, never prompts. Never claim unavailable tools ran.
+- Never add `--dangerously-skip-permissions` or write/edit capability to a chat.
 
-**Decision (2026-10-20): no embedded terminal.** Desk never hosts a terminal or a full-capability
-CLI session. The user's real terminal sessions are *observed*; Desk's own coordinator chat stays a
-read-only, single resumable session; to work in a real terminal the user presses "Resume kopyala"
-and pastes the command themselves. Do not add PTY/xterm code or `node-pty`.
+## Office life, news and LED
+
+- Ambient walking, talking and window gazing continue while nothing is working; they never imply real CLI work.
+- Lines come from per-desk and shared pools (`server/dialogues.js`) refilled rarely by Antigravity Gemini Flash within persisted
+  daily call/token/quota budgets. Never call a model per spoken line. Talk is rare: 25 s global gap, no text repeated within
+  10 minutes. Never feed chat, prompt or transcript text into the pool.
+- Kitchen lifecycle: coffee, water and fridge visits leave a mug, glass or plate on the lower counter (`view.addDish`); at `DISH_LIMIT` (8) a free sim walks over and washes
+  them away one by one (`life.clean`). Capacity is `DISH_MAX` (12). Dishes live only in browser memory.
+- Activities that must stay: visits between desks (up to four turns), window gazing, coffee, water cooler, commenting on the LED news.
+  A coordinator whose chat is open stays at its desk and is never pulled into ambient life.
+- The LED panel shows the public news board and weather. News/weather come only through the Desk-owned briefing MCP.
+  Location needs browser permission, is rounded locally (0.1°) and never reaches the dialogue model; the same permission feeds `GET /api/weather`
+  (Open-Meteo forecast plus one public reverse-geocoding call to api-bdc.io for the city name; only the rounded coordinates leave the machine).
+- The cork board at the left end of the wall is the control surface: the red pin marks the CLI in use (an agent moves it), the
+  "Konum: açık/kapalı" label is rewritten by an agent, and with location on the weather and city cards are pinned beside it.
+- News conversations open bottom-right. Only public metadata and ratings persist (`data/news/preferences.json`); chat turns,
+  private text and freeform feedback are never saved or sent to Gemini. Rating itself never calls a model.
+
+## Session continuity
+
+- A page refresh resumes the same office, moment for moment. The server keeps the real state (coordinator chat sessions: CLI session ids in
+  `data/chat-sessions.json`, never message text; news, dialogue pools, location). The page snapshots the whole scene every 300 ms to
+  `localStorage` (`desk-session-v2`): walkers mid-stride, speech, running animations, the LED news position, dishes, camera, open chat. On load
+  the sim clock is offset so time continues from the snapshot (`view.snapshot/restore`, `life.snapshot/restore`). Beyond 90 s away the moving
+  parts start fresh. Walks, bubbles and timers carry plain-data `act` descriptors, never closures; add new behaviours the same way
+  (`life.onWalk`, `onSched`, `onAct`).
+- Run the server detached (`nohup node server/server.js &`) so closing the terminal does not end the office.
+
+## Safety
+
+- Everything runs from this repo. Never edit, commit, or push in another repo under `~/Documents`; they are read-only inputs.
+- Nothing is written outside this repo. Chat sessions only read project folders.
+- The only read outside the repo and `~/Documents` is the optional `GET /api/usage`: `server/usage.js` queries the "latest usage" rows of the user's
+  Agents Deck app (`~/Library/Application Support/Agents Deck/History/History.store`) read-only with the system `sqlite3` and keeps one used-percentage
+  per provider (Claude/Codex 5-hour, Antigravity weekly Gemini 4 Argon). It never touches tokens, accounts or transcripts; without the app the board shows dashes.
+- Creating a GitHub repo or pushing needs explicit user approval each time.
+- Retain only bounded event metadata in memory. Never persist transcript text, prompts, tool bodies, or credentials.
 
 ## Workflow Logging
 
@@ -65,109 +94,22 @@ Append every completed chat-session step to `ai_usage/steps_logs.md`.
 
 - English only; step numbers monotonically increasing; append-only.
 - At most 4 bullets per step, each at most 15 words.
-- When the file exceeds ~58 KB, compact it to the 10 most recent steps
-  (tag git history first).
+- When the file exceeds ~58 KB, compact it to the 10 most recent steps (tag git history first).
 
 ## Documentation Rules
 
-- Do not create micro-level README files by default. Allow them only for
-  durable public surfaces, subsystem contracts, generated run artifacts, or
-  folders needing provenance. Prefer the nearest parent README or docstrings.
-- Keep docs current; mark superseded docs as archive instead of leaving them
-  ambiguous.
+- Do not create micro-level README files by default. Keep docs current; mark superseded docs as archive.
 
 ## Planning-Mode User Decisions (hard rule)
 
-- No auto-resolution timers for user decisions; wait for an explicit answer
-  unless a default was already authorized.
-- In Plan Mode, ask every critical decision (scope, sources, output
-  locations, repository rules) before locking it into a plan.
-
-## Glossary
-
-- **Building** = Agents Desk (the whole app). **Hierarchy**: floor → office → room.
-- **Floor** (kat) = a top-down floor plan for one category of projects.
-- **Office** (ofis) = one project (UI word "ofis"; code and API still say `room`). On the floor it is a compact office along the corridor; entering it opens the full office view.
-- **Room** (oda) = a purpose-based department inside an office, grouping related skill/task stations.
-- **Manager** = a user-selected Claude Code or Codex CLI agent that only decides and routes. Exactly one **master manager** routes directly to offices. Each office has its own **coordinators** for CLI conversations.
-- **Station** = one thing the project can do: a SKILL.md skill, or a task from `projects/<slug>.json`
-  (projects with neither get a baseline derived from their scripts). Stations are desks in the room.
-- **Worker** = the character that walks between stations, drinks coffee, and sits at the station that is in use.
-- **Level** = what the room may run (`plan` | `read-only` | `approve`); set in `desk.config.json` `levels`, then the manifest.
-- **Book** = a skill. **Lobby** = shared services (reception, library, bulletin, approvals; later).
-- **Dust** = how long a project has had no commit; it clears on the next commit.
-
-## Safety
-
-- Everything runs from this repo. Never edit, commit, or push in another repo
-  under `~/Documents`; they are read-only inputs.
-- The scanner reads git metadata via `git --no-optional-locks -C <repo>` and
-  README/AGENTS.md/SKILL.md files only. It never reads `.env*`, `node_modules`,
-  or `.git` internals, and never follows symlinks outside the repo.
-- Nothing is written outside this repo. The `workspace/<slug>` symlinks live
-  here and point at the projects.
-- Creating a GitHub repo or pushing needs explicit user approval each time.
-- Sessions started from the office (the room's "Görev" tab) run `claude` in `--restricted` mode in the
-  project's own folder, with the level enforced by `server/policy.js` on every tool call: `plan` runs
-  nothing, `read-only` only reads, `approve` asks for every edit/command/network call. SSH, sudo,
-  firewall/service commands, git push and secret files are denied at every level. Never add
-  `--dangerously-skip-permissions`, never loosen `policy.js` without tests, and never run anything for
-  emrecan-vps from the office (its level is read-only and its stations run on the server).
-- External conversation text is read only on request in "Oturumlar"; it is never cached or written.
-  CLI resume uses the CLI’s own stored thread; Desk never imports transcript bodies into chat history.
-
-## Master and office coordinators (hard rule)
-
-- **One session per coordinator chat.** Every message resumes the same CLI session until the user presses "Yeni konuşma";
-  switching CLI, floor or office never resets it. Leaving a floor/office keeps the chat panel for a keep-alive time
-  (20 min, `desk-chat-keep-min`) and reopens it on return; a chat closed on purpose is not restored.
-- **Resume code.** "Resume kopyala" copies `cd '<project>' && claude --resume <id>` / `codex resume <id>`; the user pastes it
-  in their own terminal. This explicit click (`GET /api/agents/:id/resume`) is the only way a real thread id leaves the server.
-
-- There is exactly one Master; never create floor managers. Master routes directly to office ids.
-  Floor ids are destination locations, not another model call or management layer.
-- Master’s simulated office is the default view. Clicking Master opens its chat in the same left chat panel layout as every coordinator (`ChatShell`; the "CLI çıktısı" toggle replaces the old Terminal tab).
-  The toolbar contains Master, floor navigation and CLI selection; never manager cards or chat inputs.
-  Floor navigation starts expanded; no floor is highlighted while visiting Master.
-- Master offers up to two offices and an explanation alternative. An explicit offered choice navigates
-  immediately without another LLM call. Routing uses the selected real CLI without keyword fallbacks.
-- Master has no tools (Claude: `--tools ""`; Codex: native tool capabilities/features disabled).
-  Validate every destination against offered offices; never route work to emrecan-vps.
-- Every office has one permanent, named coordinator. Bind its first observed CLI session to that sim;
-  additional sessions receive separate coordinators. Keep coordinators first in the agent roster.
-- Coordinator chat starts or resumes the selected real CLI. Bound sessions retain their provider;
-  reject concurrent sends while an external turn is working. Never imply an external terminal is
-  interactively controlled when only its log is observable. Do not silently switch providers or sessions.
-- Coordinator chats retain read-only permissions. Claude may read and invoke skills; Codex has no tools
-  and receives validated skill contracts for a real follow-up CLI turn. Never claim unavailable tools ran.
-- There is no Task tab or separate plan form. Legacy planning/run APIs and policy remain protected,
-  but are not the current UI workflow. Never weaken execution policy to compensate for removed UI.
-
-## Office life and observation
-
-- Ambient walking, breaks, and social bubbles continue while projects are inactive; they never imply real CLI work.
-  Ambient lines come from per-office and shared-floor dialogue pools refilled by Antigravity Gemini Flash within persisted daily call/token/quota budgets (`server/dialogues.js`, `office-dialogues` skill);
-  never call a model per spoken line and never feed chat, prompt or transcript text into the pool. Public news/weather comes only through the Desk-owned briefing MCP; location requires browser permission, is rounded locally, and never reaches the dialogue model.
-- Green character diamonds represent observed CLI activity or Desk runs, not ambient motion or historical station hits.
-- `scanner/watch.js` watches Claude/Codex session roots and project `.agents`/`.claude` skill roots.
-  Native notifications trigger debounced snapshots; no periodic transcript scan is allowed.
-- Large offices group skills by purpose and provide a shared coordinator room. Small offices share one room.
-  Message, phone and visit delivery styles represent actual observed assignments, never fabricated work.
-  Assigned residents interrupt breaks and return to their own stations.
-- `scanner/observer.js` passively adapts local Claude/Codex tool metadata; never install hooks in other repositories.
-  The only allowed hook path is the optional, user-approved, user-level installer from this repo
-  (`hooks/` + `scripts/install-hooks.mjs`, see the `live-signals` skill); the office must work without it.
-- Retain only bounded event metadata in memory. Never persist transcript text, prompts, tool bodies, or credentials.
-- A document handoff requires a successful write followed by a successful read at another station.
-  Label bubbles as Desk observations; never invent transferred content or claim independent agents exchanged messages.
-- Unknown/code-mode tool arguments stay unattributed project activity; do not interpret arbitrary code as telemetry.
+- No auto-resolution timers for user decisions; wait for an explicit answer unless a default was already authorized.
+- In Plan Mode, ask every critical decision (scope, sources, output locations, repository rules) before locking it into a plan.
 
 ## Language
 
 UI text is Turkish; code, comments, and docs are English.
 
-## Code Style
+## Testing
 
-- Node >= 22, ES modules, no npm dependencies; built-in `node:test` for tests.
-- Main front end: TypeScript, React, Phaser, Zustand in `app/`; build with `npm run build --prefix app`.
-- Legacy front end: vanilla JS canvas in `office/`; retained as a fallback.
+- `npm test` runs the server tests (`node:test`). Visual changes to the office need a Playwright screenshot check
+  (desks, LED, a visit, window gazing, chat open) before they are called done; unit tests alone never close a visual change.

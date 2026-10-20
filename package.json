@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Pixel-office dashboard for the projects and agents under ~/Documents",
+  "description": "Pixel-art open office: project desks with read-only CLI coordinators and a Gemini-curated news and dialogue life",
   "scripts": {
-    "scan": "node scanner/scan.js",
-    "link": "node scripts/link-workspace.js",
     "desk": "node server/server.js",
     "test": "node --test \"test/*.test.js\""
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "license": "UNLICENSED"
 }

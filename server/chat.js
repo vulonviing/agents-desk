@@ -1,12 +1,9 @@
 import { spawnClaude } from './claude.js';
-import { runDecision } from './llm.js';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
-import { join, sep } from 'node:path';
-import { agentDefs } from './agents.js';
+import { runCodexChat } from './llm.js';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
-// Conversations with an agent. A skill agent talks as that skill inside its project; a project agent is the
-// Claude Code CLI working in the project's folder. Chats are read-only (Read/Grep/Glob/Skill): doing work
-// goes through the plan and approval flow of the "Görev" tab.
+// Conversations with a coordinator (the real CLI working read-only in its project's folder). Chats are read-only (Read/Grep/Glob/Skill); the CLI keeps its own transcript and Desk only keeps the session id.
 
 export const CHAT_TOOLS = 'Read,Grep,Glob,Skill';
 const MAX_MESSAGE = 2000;
@@ -19,42 +16,46 @@ const clip = (s, n) => {
   return t.length > n ? t.slice(0, n - 1) + '…' : t;
 };
 
-// "roomId#key" → { roomId, key }
-export function parseAgentId(id) {
-  const i = String(id).indexOf('#');
-  return i < 0 ? null : { roomId: id.slice(0, i), key: id.slice(i + 1) };
-}
-
-export function findAgent(room, id) {
-  const p = parseAgentId(id);
-  if (!p || p.roomId !== room.id) return null;
-  if (p.key.startsWith('skill:')) { const station = room.stations.find(s => s.id === p.key && s.kind === 'skill'); if (station) return {kind:'skill',key:p.key,name:station.skill ?? station.name}; }
-  if (p.key.startsWith('task:')) { const station = room.stations.find(s => s.id === p.key.slice(5) && s.kind !== 'skill'); return station ? { kind: 'task', key: p.key, name: station.name, station } : null; }
-  if (p.key === 'project') return { kind: 'project', key: 'project', name: room.name, coordinator: true };
-  return agentDefs(room).find((d) => d.key === p.key) ?? null;
-}
-
 export function chatPrompt(room, def) {
-  if (def.kind === 'manager') return def.prompt;
-  const common = [
-    'Bu bir sohbettir: kullanıcıyla Türkçe, kısa ve doğrudan konuş.',
-    'Bu oturum salt-okunurdur: dosya değiştirme, komut çalıştırma ya da ağ erişimi yok. İsteği bu koordinatör sohbetinde ele al; ayrı bir Görev sekmesine yönlendirme. Düzenleme veya komut çalıştırma gerekiyorsa salt-okunur sınırını açıkça belirt.',
-    'Gizli dosyalara (.env, anahtarlar) bakma.',
-  ];
-  if (def.kind === 'task') return [`Sen ${room.name} ofisinin ${def.name} iş istasyonusun. Görevin: ${def.station.description ?? def.name}. Salt-okunur yanıt ver; komut veya betik çalıştırdığını iddia etme.`, ...common].join('\n');
-  if (def.kind === 'skill') {
+  if (def.lang === 'en') {
     return [
-      `Sen "${room.name}" projesindeki "${def.name}" skill'isin ve bu skill'in sesiyle konuşuyorsun.`,
-      `Kullanıcının mesajına önce "${def.name}" skill'inin yönergelerini (Skill aracı ya da SKILL.md) okuyarak, projenin bağlamında cevap ver.`,
-      ...common,
+      `You are the coordinator of the "${room.name}" project; your working folder is this project and its AGENTS.md / CLAUDE.md rules apply. If a skill fits the user's goal, really call it with the Skill tool or read its SKILL.md; never describe work you did not do.`,
+      'This is a conversation: reply in English, short and direct.',
+      'This session is read-only: do not change files, run commands or use the network. If an edit or command is needed, state the read-only limit clearly.',
+      'Do not look at secret files (.env, keys).',
     ].join('\n');
   }
-  return [def.coordinator ? `Sen ofisin koordinatörüsün. Kullanıcının amacına uygun skill’i gerçekten Skill aracıyla çağır veya SKILL.md yönergelerini oku; yapmadığın bir işi yapmış gibi anlatma. İstasyonlar: ${(room.stations ?? []).map(s => `${s.id}: ${s.name} — ${s.description ?? ''}`).join('; ')}` : '', `Sen "${room.name}" projesinin ajanısın; çalışma klasörün bu projedir ve projenin AGENTS.md / CLAUDE.md kuralları geçerlidir.`, ...common].join('\n');
+  return [
+    `Sen "${room.name}" projesinin koordinatörüsün; çalışma klasörün bu projedir ve projenin AGENTS.md / CLAUDE.md kuralları geçerlidir. Kullanıcının amacına uygun skill varsa Skill aracıyla gerçekten çağır ya da SKILL.md yönergesini oku; yapmadığın bir işi yapmış gibi anlatma.`,
+    'Bu bir sohbettir: kullanıcıyla Türkçe, kısa ve doğrudan konuş.',
+    'Bu oturum salt-okunurdur: dosya değiştirme, komut çalıştırma ya da ağ erişimi yok. Düzenleme veya komut çalıştırma gerekiyorsa salt-okunur sınırını açıkça belirt.',
+    'Gizli dosyalara (.env, anahtarlar) bakma.',
+  ].join('\n');
+}
+
+/** Prompt of a real, read-only Codex turn (shell exists but the sandbox is read-only and offline). */
+export function codexChatPrompt(room, def) {
+  if (def.lang === 'en') {
+    return [
+      'This is a conversation: reply in English, short and direct.',
+      `You are in the project folder (${room.name}). To answer, really read and search files (read-only commands such as cat, rg, ls, git log); do not guess, say where you found things. This session is read-only and offline: no writing, deleting, installing or network; say so when it matters.`,
+      'Never look at secret files (.env, keys, credentials) and never write their contents.',
+      "Follow the AGENTS.md of the project and the instructions under .agents/skills; if a skill fits, read its SKILL.md and answer accordingly. Never describe work you did not do.",
+      `You are the coordinator of the ${room.name} office: find the right skill for the user's goal and carry the work through it.`,
+    ].join('\n');
+  }
+  return [
+    'Bu bir sohbettir: kullanıcıyla Türkçe, kısa ve doğrudan konuş.',
+    `Proje klasöründesin (${room.name}). Soruyu cevaplamak için dosyaları gerçekten oku ve ara (cat, rg, ls, git log gibi salt-okunur komutlar); tahmin etme, bulduğun yeri belirt. Bu oturum salt-okunur ve ağsızdır: dosya yazma, silme, kurulum ya da ağ yok; gerekiyorsa bunun sınırını açıkça söyle.`,
+    'Gizli dosyalara (.env, anahtarlar, kimlik bilgileri) asla bakma ve içeriklerini yazma.',
+    'Projenin AGENTS.md dosyasındaki ve .agents/skills altındaki yönergeleri izle; uygun bir skill varsa SKILL.md yönergesini oku ve ona göre cevap ver. Yapmadığın bir işi yapmış gibi anlatma.',
+    `Sen ${room.name} ofisinin koordinatörüsün: kullanıcının amacına uygun skill'i bul ve işi ona göre yürüt.`,
+  ].join('\n');
 }
 
 export function chatArgs(room, def, sessionId) {
   return [
-    '-p', '--output-format', 'json', '--restricted', '--tools', def.kind === 'manager' ? '' : CHAT_TOOLS, '--permission-prompts', 'none', '--strict-mcp-config',
+    '-p', '--output-format', 'json', '--restricted', '--tools', CHAT_TOOLS, '--permission-prompts', 'none', '--strict-mcp-config',
     '--append-system-prompt', chatPrompt(room, def),
     ...(sessionId ? ['--resume', sessionId] : []),
   ];
@@ -92,24 +93,30 @@ export function runChat(room, def, message, sessionId = null, { timeoutMs = TIME
   });
 }
 
-function skillContract(room, station) {
-  if (!station.skill || !/^[\w.-]+$/.test(station.skill)) return station.description ?? '';
-  for (const root of ['.agents', '.claude']) try {
-    const file = realpathSync(join(room.path, root, 'skills', station.skill, 'SKILL.md'));
-    if (file.startsWith(realpathSync(room.path) + sep) && statSync(file).size <= 64_000) return readFileSync(file, 'utf8');
-  } catch { /* fall back to scanned skill metadata */ }
-  return station.description ?? '';
-}
-
 // In-memory chat history per agent (not written to disk; the CLI keeps its own transcript).
-export function createChats({ onChange = () => {} } = {}) {
+// sessionsFile (optional): only the CLI session ids are kept on disk (never any message text), so a server restart resumes the same
+// real CLI sessions; the conversation itself stays in the CLI's own transcript.
+export function createChats({ onChange = () => {}, sessionsFile = null } = {}) {
   const chats = new Map();
   const busy = new Set();
-  const get = (id) => chats.get(id) ?? { sessionId: null, messages: [] };
+  let saved = {};
+  try { if (sessionsFile && existsSync(sessionsFile)) saved = JSON.parse(readFileSync(sessionsFile, 'utf8')); } catch { saved = {}; }
+  const persist = () => {
+    if (!sessionsFile) return;
+    try {
+      const ids = Object.fromEntries([...chats.entries()].filter(([, c]) => c.sessionId && /^[A-Za-z0-9_-]{8,80}$/.test(c.sessionId)).map(([k, c]) => [k, c.sessionId]));
+      saved = { ...saved, ...ids };
+      for (const k of Object.keys(saved)) if (chats.has(k) && !chats.get(k).sessionId) delete saved[k]; // a reset chat forgets its session
+      mkdirSync(dirname(sessionsFile), { recursive: true });
+      writeFileSync(sessionsFile + '.tmp', JSON.stringify(saved), { mode: 0o600 });
+      renameSync(sessionsFile + '.tmp', sessionsFile);
+    } catch { /* sessions still work from memory */ }
+  };
+  const get = (id) => chats.get(id) ?? { sessionId: typeof saved[id] === 'string' ? saved[id] : null, messages: [] };
   return {
-    state: id => { const entry = [...chats.entries()].filter(([key]) => key.endsWith(`:${id}`)).sort((a,b) => Number(busy.has(b[0])) - Number(busy.has(a[0])) || (b[1].at ?? '').localeCompare(a[1].at ?? ''))[0]; const chat = entry?.[1]; return chat ? { ...chat, messages: undefined, busy: busy.has(entry[0]), provider: entry[0].split(':')[0] } : null; },
+    state: id => { const entry = [...chats.entries()].filter(([key]) => key.endsWith(`:${id}`)).sort((a,b) => Number(busy.has(b[0])) - Number(busy.has(a[0])) || (b[1].at ?? '').localeCompare(a[1].at ?? ''))[0]; const chat = entry?.[1]; if (!chat) { const k = Object.keys(saved).find(key => key.endsWith(`:${id}`)); return k ? { sessionId: saved[k], messages: undefined, busy: false, provider: k.split(':')[0] } : null; } return chat ? { ...chat, messages: undefined, busy: busy.has(entry[0]), provider: entry[0].split(':')[0] } : null; },
     history: (id) => ({ messages: get(id).messages, busy: busy.has(id) }),
-    reset: (id) => chats.delete(id),
+    reset: (id) => { chats.delete(id); delete saved[id]; persist(); },
     async send(room, def, id, message, provider = 'claude', { resumeSessionId, onEvent = () => {} } = {}) {
       if (busy.has(id)) throw Object.assign(new Error('Bu ajan hâlâ bir önceki mesajı cevaplıyor.'), { status: 409 });
       const text = String(message ?? '').trim();
@@ -117,9 +124,9 @@ export function createChats({ onChange = () => {} } = {}) {
       busy.add(id);
       const chat = get(id);
       if (resumeSessionId) chat.sessionId = resumeSessionId;
-      chat.at = new Date().toISOString(); chat.task = text; chat.stationId = null;
+      chat.at = new Date().toISOString();
       chats.set(id, chat);
-      onChange({ id, roomId: room.id, provider, phase: 'started' });
+      onChange({ id, provider, phase: 'started' });
       const push = (role, t) => chat.messages.push({ role, text: t, at: new Date().toISOString() });
       push('user', text);
       try {
@@ -129,23 +136,12 @@ export function createChats({ onChange = () => {} } = {}) {
           ({ reply, sessionId } = await runChat(room, def, text, chat.sessionId));
           onEvent({ kind: 'output', text: reply });
         } else {
-          const schema = { type: 'object', properties: { reply: { type: 'string' }, ...(def.coordinator ? { stationId: { type: 'string' } } : {}) }, required: ['reply', ...(def.coordinator ? ['stationId'] : [])] };
-          const opts = { provider, onEvent, cwd: room.path, persist: !!def.coordinator, sessionId: def.coordinator ? chat.sessionId : null, onSession: value => { if (!def.coordinator) return; chat.sessionId = sessionId = value; onChange({ id, roomId: room.id, provider, phase: 'session' }); } };
-          const metadata = `${room.readmeSummary ?? ''}\n${(room.stations ?? []).map(s => `${s.id}: ${s.name} — ${s.description ?? ''}`).join('\n')}`;
-          const answer = await runDecision(`${chatPrompt(room, def)}\nProje bağlamı:\n${metadata}\nAraçların kapalı. Dosyaları okuduğunu veya komut çalıştırdığını iddia etme.${def.coordinator ? ' İş için uygun skill varsa stationId alanına onun kimliğini yaz; aksi halde boş bırak. Skill çağrısını uygulama bir sonraki gerçek CLI turunda yapacak.' : ''}`, JSON.stringify(chat.messages.slice(-20)), schema, opts);
-          reply = answer.reply;
-          // an empty or unknown skill id is not an error: the coordinator simply answers in the chat
-          const station = def.coordinator && answer.stationId ? room.stations.find(s => s.id === answer.stationId) : null;
-          if (station) {
-            if (room.id === 'emrecan-vps') throw new Error('Bu ofiste iş yönlendirme kapalı.');
-            chat.stationId = station.id;
-            onChange({ id, roomId: room.id, provider, phase: 'delegation', stationId: station.id });
-            const result = await runDecision(`Sen ${room.name} ofisinde ${station.name} uzmanısın. Salt-okunur çalış; yalnızca verilen bağlamla yanıt ver. Araç kullanma, dosyaları okuduğunu iddia etme.\nSkill yönergeleri:\n${skillContract(room, station)}\nProje bağlamı:\n${metadata}`, text, { type: 'object', properties: { reply: { type: 'string' } }, required: ['reply'] }, { ...opts, sessionId });
-            reply = `${station.name}:\n${result.reply}`;
-          }
+          // a real read-only Codex session in the project folder (reads files, follows the project's AGENTS.md/skills, resumes its thread)
+          ({ reply, sessionId } = await runCodexChat(codexChatPrompt(room, def), text, { cwd: room.path, sessionId: chat.sessionId, persist: true, onEvent }));
         }
         chat.sessionId = sessionId;
         push('assistant', reply);
+        chats.set(id, chat); persist();
       } catch (err) {
         push('error', err.message);
         onEvent({ kind: 'error', text: err.message });
@@ -154,7 +150,7 @@ export function createChats({ onChange = () => {} } = {}) {
         chat.messages = chat.messages.slice(-MAX_HISTORY);
         chats.set(id, chat);
         busy.delete(id);
-        onChange({ id, roomId: room.id, provider, phase: 'completed', ok: chat.messages.at(-1)?.role !== 'error' });
+        onChange({ id, provider, phase: 'completed', ok: chat.messages.at(-1)?.role !== 'error' });
       }
       return chat.messages;
     },
