@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { gameApi } from '../../game/gameApi';
 import { timeAgo } from '../../lib/format';
 import { useChat } from '../../stores/chatStore';
 import { useManagers } from '../../stores/managersStore';
 import { useOffice } from '../../stores/officeStore';
-import { Avatar } from '../AgentPanel/Avatar';
+import { ChatShell } from './ChatShell';
+import { ResumeButton } from './ResumeButton';
 import { FormattedMessage } from './FormattedMessage';
 import { chatTimeline } from './timeline';
 
@@ -23,13 +24,21 @@ export function ChatPanel({ agentId }: { agentId: string }) {
   const messages = useChat((s) => s.byAgent[key]) ?? EMPTY;
   const busy = useChat((s) => !!s.busy[key]);
   const { load, send, reset } = useChat.getState();
-  const [text, setText] = useState('');
-  const end = useRef<HTMLDivElement>(null);
-  const input = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { void load(agentId); }, [agentId, provider, load]);
-  useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [messages.length, busy, dto?.cliActive]);
-  useEffect(() => { input.current?.focus(); }, [agentId]);
+
+  // Live CLI output of this coordinator's own turns (same bounded log the Master uses)
+  const terminal = useManagers((s) => s.terminal);
+  const loadTerminal = useManagers((s) => s.loadTerminal);
+  const [showCli, setShowCli] = useState(false);
+  const [terminalError, setTerminalError] = useState('');
+  const entries = terminal.filter((e) => e.provider === provider && e.managerId === agentId);
+  useEffect(() => { setShowCli(false); }, [agentId, provider]);
+  useEffect(() => {
+    if (!showCli) return;
+    setTerminalError('');
+    void loadTerminal(agentId).catch(() => setTerminalError('CLI çıktısına ulaşılamadı.'));
+  }, [showCli, agentId, provider, loadTerminal]);
 
   const stationName = (id: string | null) => room?.stations.find((s) => s.id === id)?.name ?? id ?? '';
   // observed events of this agent (oldest first), shown as cards under the messages
@@ -43,70 +52,52 @@ export function ChatPanel({ agentId }: { agentId: string }) {
   const cliName = CLI[bound ?? provider];
   const working = !!dto.cliActive;
 
-  const submit = () => {
-    const t = text.trim();
-    if (!t || busy || working || wrongCli) return;
-    setText('');
-    void send(agentId, t);
-  };
-
   return (
-    <aside className="chat-panel" aria-label={`${dto.name} sohbeti`}>
-      <header className="chat-head">
-        <Avatar variant={dto.variant} scale={1.5} />
-        <div className="chat-title">
-          <strong>{dto.name}</strong>
-          <span className="muted">{room?.name} · {cliName}</span>
-          <span className={`pill ${working ? 'working' : busy ? 'thinking' : 'idle'}`}>{working ? '● CLI çalışıyor' : busy ? 'Yanıtlıyor' : bound ? 'Oturum bağlı' : 'Sohbete hazır'}</span>
+    <ChatShell
+      ariaLabel={`${dto.name} sohbeti`}
+      avatar={dto.variant}
+      title={dto.name}
+      subtitle={`${room?.name} · ${cliName}`}
+      status={{ tone: working ? 'working' : busy ? 'thinking' : 'idle', label: working ? '● CLI çalışıyor' : busy ? 'Yanıtlıyor' : bound ? 'Oturum bağlı' : 'Sohbete hazır' }}
+      actions={<><button type="button" onClick={() => gameApi.host?.focusAgent(dto.id)}>Sime git</button>{dto.sessionId && <ResumeButton agentId={dto.id} />}<button type="button" aria-pressed={showCli} onClick={() => setShowCli((v) => !v)}>{showCli ? 'Sohbet' : 'CLI çıktısı'}</button></>}
+      onClose={() => openChat(null)}
+      notice={wrongCli ? <p className="warn">Bu oturum {CLI[bound]} kullanıyor. Üst bardan aynı CLI’ı seç.</p> : undefined}
+      scrollKey={`${messages.length}-${busy}-${dto.cliActive}`}
+      placeholder="Mesaj yaz… (Enter gönderir, Shift+Enter yeni satır)"
+      busy={busy}
+      sendDisabled={working || wrongCli}
+      onSend={(t) => send(agentId, t)}
+      resetLabel="Yeni konuşma"
+      resetDisabled={busy || messages.length === 0}
+      onReset={() => void reset(agentId)}
+      note="Tek oturum: sen sıfırlamadıkça konuşma aynı CLI oturumunda sürer. Sohbet salt-okunurdur; işler kartlarda ve simlerde görünür."
+      focusKey={agentId}
+      alternate={showCli ? (
+        <div className="chat-log terminal-lines" role="log" aria-label="Canlı CLI çıktısı" aria-live="polite">
+          {entries.length === 0 && <p className="muted">Henüz CLI çağrısı yok. Sohbetten mesaj gönderdiğinde CLI’ın çıktısı burada görünür.</p>}
+          {entries.map((e) => <div key={e.id} className={`terminal-entry ${e.kind}`}><small>{e.at.slice(11, 19)} · {e.label}</small><pre>{e.text}</pre></div>)}
+          {terminalError && <p className="error">{terminalError}</p>}
         </div>
-        <button type="button" onClick={() => gameApi.host?.focusAgent(dto.id)}>Sime git</button>
-        <button type="button" className="close" aria-label="Sohbeti kapat" onClick={() => openChat(null)}>✕</button>
-      </header>
-      {wrongCli && <p className="warn">Bu oturum {CLI[bound]} kullanıyor. Üst bardan aynı CLI’ı seç.</p>}
-      <div className="chat-log" aria-live="polite">
-        {messages.length === 0 && !busy && <p className="muted">Henüz mesaj yok. Bu ofiste ne istediğini yaz; CLI’ın yaptığı işler aşağıda kartlar olarak görünür.</p>}
-        {timeline.map(item => {
-          if (item.type === 'message') return <div key={item.key} className={`msg ${item.message.role}`}><FormattedMessage text={item.message.text} /></div>;
-          const e = item.event;
-          return <div key={item.key} className="activity-card">
-            <span aria-hidden="true">{e.kind === 'completed' ? '✔' : e.kind === 'error' ? '⛔' : e.kind === 'handoff' ? '⇄' : '⚙'}</span>
-            <div>
-              <strong>{e.kind === 'completed' ? 'Tur tamamlandı' : e.kind === 'error' ? 'Tur kesildi' : e.kind === 'handoff' ? `${stationName(e.from)} → ${stationName(e.to)}` : `${stationName(e.to)}`}</strong>
-              <small>{e.kind === 'handoff' ? `${e.file ?? 'dosya'} aktarıldı` : e.kind === 'activation' ? `${e.tool} · ${timeAgo(e.at)}` : timeAgo(e.at)}</small>
-            </div>
-          </div>;
-        })}
-        {(busy || working) && <div className="activity-card live" role="status">
-          <span aria-hidden="true">●</span>
-          <div><strong>{busy ? 'Yanıt hazırlanıyor…' : 'CLI çalışıyor'}</strong>
-            {working && dto.observation?.tool && <small>{dto.observation.tool}{dto.observation.file ? ` · ${dto.observation.file}` : ''}</small>}
+      ) : undefined}
+    >
+      {messages.length === 0 && !busy && <p className="muted">Henüz mesaj yok. Bu ofiste ne istediğini yaz; CLI’ın yaptığı işler aşağıda kartlar olarak görünür.</p>}
+      {timeline.map(item => {
+        if (item.type === 'message') return <div key={item.key} className={`msg ${item.message.role}`}><FormattedMessage text={item.message.text} /></div>;
+        const e = item.event;
+        return <div key={item.key} className="activity-card">
+          <span aria-hidden="true">{e.kind === 'error' ? '⛔' : e.kind === 'handoff' ? '⇄' : '⚙'}</span>
+          <div>
+            <strong>{e.kind === 'error' ? 'Tur kesildi' : e.kind === 'handoff' ? `${stationName(e.from)} → ${stationName(e.to)}` : `${stationName(e.to)}`}</strong>
+            <small>{e.kind === 'handoff' ? `${e.file ?? 'dosya'} aktarıldı` : e.kind === 'activation' ? `${e.tool} · ${timeAgo(e.at)}` : timeAgo(e.at)}</small>
           </div>
-        </div>}
-        <div ref={end} />
-      </div>
-      <div className="chat-input">
-        <textarea
-          ref={input}
-          value={text}
-          rows={3}
-          maxLength={2000}
-          placeholder="Mesaj yaz… (Enter gönderir, Shift+Enter yeni satır)"
-          aria-label="Mesaj"
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-        />
-        <div className="chat-actions">
-          <button type="button" className="primary" disabled={busy || working || !text.trim() || wrongCli} onClick={submit}>Gönder</button>
-          <button type="button" disabled={busy || messages.length === 0} onClick={() => void reset(agentId)}>{dto.sessionId ? 'Görünümü temizle' : 'Yeni konuşma'}</button>
+        </div>;
+      })}
+      {(busy || working) && <div className="activity-card live" role="status">
+        <span aria-hidden="true">●</span>
+        <div><strong>{busy ? 'Yanıt hazırlanıyor…' : 'CLI çalışıyor'}</strong>
+          {working && dto.observation?.tool && <small>{dto.observation.tool}{dto.observation.file ? ` · ${dto.observation.file}` : ''}</small>}
         </div>
-        <p className="muted">Sohbet salt-okunurdur; gerçek CLI’ın işleri yukarıdaki kartlarda ve simlerde görünür.</p>
-      </div>
-    </aside>
+      </div>}
+    </ChatShell>
   );
 }

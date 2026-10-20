@@ -25,6 +25,8 @@ export interface HostState {
 
 export interface AmbientConversation {
   id: string;
+  /** screen position (px, viewport) of the speakers when the popup was opened; the popup sits next to it */
+  anchor?: { x: number; y: number };
   participants: {id:string;name:string}[];
   turns: {speakerId:string;text:string}[];
   active: boolean;

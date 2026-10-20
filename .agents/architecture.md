@@ -60,7 +60,7 @@ Configuration: `sessions.projectsDir`, `sessions.codexSessionsDir` (false disabl
 
 `scanner/observer.js` consumes bounded log chunks incrementally, skips symlinks, suppresses initial
 history replay and stores bounded metadata only. Session ids are private hashes of log identity; real
-CLI thread ids remain server-side for validated resume. Metadata includes provider, cwd mapping, model,
+CLI thread ids remain server-side for validated resume; the only exception is the explicit, loopback-only `GET /api/agents/:id/resume`, which returns the shell command that resumes a coordinator's session when the user clicks "Resume kopyala". Metadata includes provider, cwd mapping, model,
 tool, known station, timestamps and sanitized artifact basenames. No prompts, command bodies, tool
 outputs, secrets or transcript text are retained. New session records bind/spawn coordinators; an
 interactive CLI that has not written a log cannot yet be detected. Recent logs cannot prove an idle

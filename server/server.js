@@ -17,6 +17,7 @@ import { buildAgents, summarize } from './agents.js';
 import { createChats, findAgent } from './chat.js';
 import { createDialogueCreator } from './dialogue-creator.js';
 import { createDialogues } from './dialogues.js';
+import { resumeCommand } from './resume.js';
 import { getBriefing } from './briefing-client.js';
 import { createAntigravityRunner } from './antigravity.js';
 import { CHOICE_SCHEMA, choicePrompt, findManager, managerChatPrompt, managerDefs, optionsFor, pickTarget } from './managers.js';
@@ -212,7 +213,7 @@ export function createDeskServer(deps = {}) {
   // Ambient dialogue pools (Antigravity Flash refills them rarely; see server/dialogues.js and the office-dialogues skill)
   const dialogues = createDialogues({ dataDir, config, creator: createDialogueCreator({dataDir}), run: createAntigravityRunner({ dataDir }), onChange: scope => emit('dialogues', {scope}), briefing: async office => {
     let location = {}; try { location = JSON.parse(readFileSync(join(dataDir, 'weather-location.json'), 'utf8')); } catch { /* no location permission */ }
-    return (deps.briefing ?? getBriefing)(dataDir, { topic: office.topic, queries: office.searchQueries ?? [], ...location });
+    return (deps.briefing ?? getBriefing)(dataDir, { topics: office.topics ?? [office.topic].filter(Boolean), queries: office.searchQueries ?? [], standing: true, ...location });
   } });
   const officeContext = (id) => {
     const data = readProjects();
@@ -239,6 +240,14 @@ export function createDeskServer(deps = {}) {
     });
     return {name:`${floor.name} katı`,floor:floor.name,agents:agents.slice(0,24),recent:[],topic:id==='research'?'science':id==='growth'?'business':'technology',curator:'Ofislerin gündem küratörleri',concept:`${floor.name}: farklı ofislerden meslektaşların karşılaşması, disiplinler arası merak, gündem tartışması, ortak alan hikâyeleri. Ofis farklarını konuştur. En az %70 genel satır olsun.`};
   };
+  // The dialogue libraries of ALL scopes are kept fresh in the background (three refills a day), one scope at a time.
+  const warmDialogues = () => {
+    const data = readProjects();
+    const scopes = [...data.floors.flatMap(f => f.rooms.map(r => ({ id: r.id, ctx: officeContext(r.id) }))), ...data.floors.map(f => ({ id: `floor:${f.id}`, ctx: floorContext(f.id) }))];
+    return dialogues.warm(scopes);
+  };
+  let warmTimer = null;
+  if (deps.warmDialogues) { setTimeout(warmDialogues, 20_000).unref(); warmTimer = setInterval(warmDialogues, 10 * 60_000); warmTimer.unref(); }
   const chats = createChats({ onChange: event => {
     if (event.phase === 'delegation') {
       localObservations.push({ id: randomUUID(), kind: 'activation', at: new Date().toISOString(), roomId: event.roomId, provider: event.provider, from: null, to: event.stationId, tool: 'Skill görevi', file: null, coordinatorId: event.id.slice(event.provider.length + 1) });
@@ -275,6 +284,11 @@ export function createDeskServer(deps = {}) {
         const provider = providerOf(url.searchParams.get('provider') ?? undefined);
         return send(res, 200, { entries: managerCli.filter((e) => e.provider === provider && e.managerId === id) });
       }
+      if ((m = path.match(/^\/api\/agents\/([^/]+)\/terminal$/))) {
+        const id = decodeURIComponent(m[1]);
+        const provider = providerOf(url.searchParams.get('provider') ?? undefined);
+        return send(res, 200, { entries: managerCli.filter((e) => e.provider === provider && e.managerId === id) });
+      }
       if (path === '/api/projects') return send(res, 200, readProjects());
       if (path === '/api/activity') return send(res, 200, readActivity());
       if (path === '/api/sessions') return send(res, 200, scanSessions(readProjects(), config()));
@@ -291,6 +305,20 @@ export function createDeskServer(deps = {}) {
         return send(res, 200, { ...briefing, curator: ctx.curator, concept: ctx.concept });
       }
       if (path === '/api/dialogues/status') return send(res, 200, dialogues.status());
+      // The command that resumes this coordinator's real CLI session in a terminal (the user pastes it; Desk never types for them).
+      if ((m = path.match(/^\/api\/agents\/([^/]+)\/resume$/))) {
+        const id = decodeURIComponent(m[1]);
+        const coordinator = snapshot().agents.find(a => a.id === id && a.coordinator);
+        const room = coordinator ? getRoom(id.split('#')[0]) : null;
+        if (!coordinator || !room) return fail(res, 404, 'Koordinatör bulunamadı.');
+        const attached = coordinator.sessionId ? observer.resolve(coordinator.sessionId) : null;
+        const chat = chats.state(id);
+        const provider = attached?.provider ?? chat?.provider ?? (url.searchParams.get('provider') === 'codex' ? 'codex' : 'claude');
+        const sessionId = attached?.sessionId ?? (chat?.provider === provider ? chat.sessionId : null) ?? null;
+        if (!sessionId || !/^[A-Za-z0-9_-]{8,80}$/.test(sessionId)) return fail(res, 404, 'Bu koordinatörün devam edilebilir bir oturumu yok.');
+        const cwd = attached?.cwd ?? room.path;
+        return send(res, 200, { provider, cwd, command: resumeCommand(provider, sessionId, cwd) });
+      }
       if (path === '/api/dialogues') {
         const floorId = url.searchParams.get('floor');
         const scopeId = floorId ?? url.searchParams.get('office') ?? '';
@@ -376,7 +404,7 @@ export function createDeskServer(deps = {}) {
         chats.reset(chatId);
         return send(res, 200, { messages: [] });
       }
-      try { return send(res, 200, { messages: await chats.send(attached?.cwd ? { ...room, path: attached.cwd } : room, def, chatId, message, provider, { resumeSessionId: attached?.sessionId }) }); } finally { observer.invalidate(); soon(); }
+      try { return send(res, 200, { messages: await chats.send(attached?.cwd ? { ...room, path: attached.cwd } : room, def, chatId, message, provider, { resumeSessionId: attached?.sessionId, onEvent: cliEvents(provider, id, def.name ?? id) }) }); } finally { observer.invalidate(); soon(); }
     }
     if (path === '/api/dispatch') {
       const body = await readJson(req);
@@ -500,6 +528,7 @@ export function createDeskServer(deps = {}) {
   server.on('listening', () => activityWatch.configure(readProjects(), config()));
   server.on('close', () => {
     clearInterval(heartbeat);
+    clearInterval(warmTimer);
     activityWatch.close();
     clearTimeout(expiryTimer);
     clearTimeout(refreshTimer);
@@ -520,6 +549,6 @@ async function listen(server, port) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const port = await listen(createDeskServer(), loadConfig().port ?? 4317);
+  const port = await listen(createDeskServer({ warmDialogues: true }), loadConfig().port ?? 4317);
   console.log(`Agents Desk → http://127.0.0.1:${port}/`);
 }

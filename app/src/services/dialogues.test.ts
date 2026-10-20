@@ -27,7 +27,7 @@ describe('dialogue pools', () => {
     const got = [0, 0, 0].map(() => pickLine('o', 'coffee', 'A', undefined, () => 0)!.text);
     expect(new Set(got).size).toBe(3);
     expect(pickLine('o', 'coffee', 'A', undefined, () => 0)).toBeNull();
-    expect(pickLine('o', 'coffee', 'A', undefined, () => 0, Date.now() + 60_001)).not.toBeNull();
+    expect(pickLine('o', 'coffee', 'A', undefined, () => 0, Date.now() + 10 * 60_000 + 1)).not.toBeNull();
   });
 
   it('removes legacy name placeholders instead of speaking skill names', async () => {

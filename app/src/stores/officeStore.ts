@@ -29,6 +29,8 @@ interface OfficeState {
   /** the agent whose chat is open in the left panel */
   chatAgentId: string | null;
   openChat(id: string | null): void;
+  /** chats left open when navigating away; restored within the keep-alive time (see chatKeepMs) */
+  chatMemory: Record<string, { kind: 'agent' | 'manager'; id: string; at: number }>;
   selectedManagerId: string | null;
   selectedStationId: string | null;
   hover: Hover | null;
@@ -55,6 +57,19 @@ interface OfficeState {
 
 const roomsOf = (p: Projects | null) => p?.floors.flatMap((f) => f.rooms) ?? [];
 
+// A chat is kept for a while after the user leaves its floor/office (people go back by accident or on purpose); after this time
+// the panel is not restored. The conversation itself (resume id, history) is kept until the user starts a new one.
+export const chatKeepMs = () => { try { return Math.max(1, Number(localStorage.getItem('desk-chat-keep-min')) || 20) * 60_000; } catch { return 20 * 60_000; } };
+type Memory = OfficeState['chatMemory'];
+function remembered(state: Pick<OfficeState, 'chatAgentId' | 'selectedManagerId' | 'office' | 'chatMemory'>, now = Date.now()): Memory {
+  const memory: Memory = Object.fromEntries(Object.entries(state.chatMemory).filter(([, m]) => now - m.at < chatKeepMs()));
+  const agent = state.chatAgentId ? state.office?.agents.find((a) => a.id === state.chatAgentId) : null;
+  if (agent) memory[agent.roomId] = { kind: 'agent', id: agent.id, at: now };
+  if (state.selectedManagerId) memory.master = { kind: 'manager', id: state.selectedManagerId, at: now };
+  return memory;
+}
+const restorable = (memory: Memory, key: string, now = Date.now()) => (memory[key] && now - memory[key]!.at < chatKeepMs() ? memory[key]! : null);
+
 export const useOffice = create<OfficeState>((set, get) => ({
   effectsEnabled: true,
   toggleEffects: () => set({ effectsEnabled: !get().effectsEnabled }),
@@ -64,13 +79,23 @@ export const useOffice = create<OfficeState>((set, get) => ({
   demo: false,
   inMaster: true,
   floorsOpen: true,
-  goMaster: () => set({ inMaster: true, roomId: null, selectedManagerId: null, selectedAgentId: null, chatAgentId: null, selectedStationId: null, panelOpen: false }),
+  goMaster() {
+    const memory = remembered(get());
+    const back = restorable(memory, 'master');
+    set({ chatMemory: memory, inMaster: true, roomId: null, selectedManagerId: back?.id ?? null, selectedAgentId: null, chatAgentId: null, selectedStationId: null, panelOpen: !!back });
+  },
   toggleFloors: () => set({ floorsOpen: !get().floorsOpen }),
   floorId: null,
   roomId: null,
   selectedAgentId: null,
   chatAgentId: null,
-  openChat: (id) => set({ chatAgentId: id }),
+  chatMemory: {},
+  openChat: (id) => {
+    const { chatAgentId, office, chatMemory } = get();
+    // closing a chat on purpose forgets it: it must not come back on its own
+    const closing = !id && chatAgentId ? office?.agents.find((a) => a.id === chatAgentId)?.roomId : null;
+    set({ chatAgentId: id, ...(closing ? { chatMemory: Object.fromEntries(Object.entries(chatMemory).filter(([k]) => k !== closing)) } : {}) });
+  },
   selectedManagerId: null,
   selectedStationId: null,
   hover: null,
@@ -94,20 +119,24 @@ export const useOffice = create<OfficeState>((set, get) => ({
   setDemo: (demo) => set({ demo }),
   setFloor(id) {
     if (!get().inMaster && get().floorId === id && !get().roomId) return;
-    set({ inMaster: false, floorId: id, roomId: null, selectedManagerId: null, selectedAgentId: null, chatAgentId: null, selectedStationId: null, panelOpen: false, panelTab: 'agent' });
+    set({ chatMemory: remembered(get()), inMaster: false, floorId: id, roomId: null, selectedManagerId: null, selectedAgentId: null, chatAgentId: null, selectedStationId: null, panelOpen: false, panelTab: 'agent' });
   },
   enterRoom(roomId) {
     const floor = get().projects?.floors.find((f) => f.rooms.some((r) => r.id === roomId));
     if (!floor) return;
-    set({ inMaster: false, floorId: floor.id, roomId, selectedAgentId: null, chatAgentId: null, selectedManagerId: null, selectedStationId: null, panelOpen: true, panelTab: 'activity' });
+    const memory = remembered(get());
+    const back = restorable(memory, roomId);
+    const agent = back ? get().office?.agents.find((a) => a.id === back.id) : null;
+    // coming back within the keep-alive time reopens the conversation where it was left
+    set({ chatMemory: memory, inMaster: false, floorId: floor.id, roomId, selectedAgentId: agent?.id ?? null, chatAgentId: agent?.id ?? null, selectedManagerId: null, selectedStationId: null, panelOpen: true, panelTab: agent ? 'agent' : 'activity' });
   },
-  leaveRoom: () => set({ roomId: null, selectedStationId: null, selectedAgentId: null, chatAgentId: null, panelOpen: false, panelTab: 'agent' }),
+  leaveRoom: () => set({ chatMemory: remembered(get()), roomId: null, selectedStationId: null, selectedAgentId: null, chatAgentId: null, panelOpen: false, panelTab: 'agent' }),
   selectAgent(id) {
-    if (!id) return set({ selectedAgentId: null, chatAgentId: null, ...(get().roomId ? {} : { panelOpen: false }) });
+    if (!id) { get().openChat(null); return set({ selectedAgentId: null, chatAgentId: null, ...(get().roomId ? {} : { panelOpen: false }) }); }
     set({ selectedAgentId: id, chatAgentId: get().chatAgentId === id ? id : null, selectedManagerId: null, panelOpen: true, panelTab: 'agent' });
   },
   selectManager(id) {
-    if (!id) return set({ selectedManagerId: null, ...(get().roomId ? {} : { panelOpen: false }) });
+    if (!id) return set({ selectedManagerId: null, chatMemory: Object.fromEntries(Object.entries(get().chatMemory).filter(([k]) => k !== 'master')), ...(get().roomId ? {} : { panelOpen: false }) });
     set({ selectedManagerId: id, selectedAgentId: null, chatAgentId: null, panelOpen: true });
   },
   selectStation(id) {

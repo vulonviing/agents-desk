@@ -7,4 +7,4 @@ it('places a new thread without covering an existing stack and stays inside the 
  expect(b.x+b.width<=892&&b.y+b.height<=592).toBe(true);
  expect(placeSpeechBlock({x:0,y:0,width:380,height:400},[],390,300)).toBeNull();
 });
-it('allows comfortable reading time for short and long turns',()=>{expect(turnDuration('Selam.')).toBe(6500);expect(turnDuration('x'.repeat(80))).toBe(10600);});
+it('allows comfortable reading time for short and long turns',()=>{expect(turnDuration('Selam.')).toBe(3500);expect(turnDuration('x'.repeat(80))).toBe(6200);expect(turnDuration('x'.repeat(400))).toBe(7500);});

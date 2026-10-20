@@ -4,6 +4,7 @@ import { ChatPanel } from './components/Chat/ChatPanel';
 import { GameCanvas } from './components/GameCanvas';
 import { GameControls } from './components/GameControls/GameControls';
 import { OfficeHUD } from './components/OfficeHUD/OfficeHUD';
+import { MasterChatPanel } from './components/Managers/MasterChatPanel';
 import { DockPanel } from './components/RoomPanel/DockPanel';
 import { useOffice } from './stores/officeStore';
 
@@ -14,6 +15,7 @@ export function App() {
   const panelOpen = useOffice((s) => s.panelOpen);
   const roomId = useOffice((s) => s.roomId);
   const chatAgentId = useOffice((s) => s.chatAgentId);
+  const managerId = useOffice((s) => s.selectedManagerId);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -29,7 +31,7 @@ export function App() {
   }, []);
 
   return (
-    <div className={`app ${inMaster ? 'master-mode' : ''} ${panelOpen ? 'with-dock' : ''} ${chatAgentId && !inMaster ? 'with-chat' : ''}`}>
+    <div className={`app ${inMaster ? 'master-mode' : ''} ${panelOpen ? 'with-dock' : ''} ${(chatAgentId && !inMaster) || managerId ? 'with-chat' : ''}`}>
       <OfficeHUD />
       <main className="stage">
         <div className="canvas-wrap">
@@ -43,7 +45,8 @@ export function App() {
             </div>
           )}
         </div>
-        {chatAgentId && !inMaster && <ChatPanel key={chatAgentId} agentId={chatAgentId} />}
+        {managerId && <MasterChatPanel key={managerId} managerId={managerId} />}
+        {!managerId && chatAgentId && !inMaster && <ChatPanel key={chatAgentId} agentId={chatAgentId} />}
         <DockPanel />
       </main>
     </div>

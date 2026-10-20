@@ -4,7 +4,7 @@ import { useManagers } from './managersStore';
 
 beforeEach(() => useManagers.setState({ provider: 'codex', busy: false, busyManagerId: null, threads: {}, terminal: [] }));
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-it('preserves the master continuation until the selected CLI changes', async () => {
+it('keeps one Master conversation per CLI: switching CLI never resets a thread, the continuation is kept until the user resets', async () => {
   const bodies: Record<string, unknown>[] = [];
   vi.stubGlobal('fetch', vi.fn(async (_path: string, opts: { body: string }) => {
     const body = JSON.parse(opts.body); bodies.push(body);
@@ -19,7 +19,9 @@ it('preserves the master continuation until the selected CLI changes', async () 
   expect(bodies[1]!.managerId).toBe('manager:master');
   expect(bodies[1]!.provider).toBe('codex');
   s().setProvider('claude');
-  expect(s().threads).toEqual({});
+  expect(Object.keys(s().threads)).toEqual(['codex:manager:master']); // nothing was reset
+  s().setProvider('codex');
+  expect(s().threads['codex:manager:master']!.last?.clarification?.id).toBe('master-question');
 });
 it('blocks duplicate sends while a manager is still answering', async () => {
   let resolve!: (v: unknown) => void;
@@ -43,7 +45,7 @@ it('an explicit office choice enters it immediately and sends the offered target
     return { ok: true, json: async () => ({ route: [], plan: null, go: { floorId: 'g', roomId: 'cv' } }) };
   });
   vi.stubGlobal('fetch', fetch);
-  useManagers.setState({ threads: { 'manager:master': { messages: [], error: null, last: { route: [], plan: null, go: null, clarification: { id: 'offered', by: 'Manager', question: 'Which?', options: [{ id: 'cv', name: 'CV' }] } } } } });
+  useManagers.setState({ threads: { 'codex:manager:master': { messages: [], error: null, last: { route: [], plan: null, go: null, clarification: { id: 'offered', by: 'Manager', question: 'Which?', options: [{ id: 'cv', name: 'CV' }] } } } } });
   await useManagers.getState().dispatch('CV', 'manager:master', { targetId: 'cv' });
   expect(enter).toHaveBeenCalledWith('cv');
   expect(fetch).toHaveBeenCalledTimes(1);

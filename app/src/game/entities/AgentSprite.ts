@@ -84,7 +84,7 @@ export class AgentSprite {
 
   clearAmbientSpeech() { clearSpeech(this.scene,this.id,true); }
 
-  say(text: string, observed = false, duration = 7500, heading?: string, sourceUrl?: string, threadId?: string) {
+  say(text: string, observed = false, duration = 5500, heading?: string, sourceUrl?: string, threadId?: string) {
     const label = this.scene.add.text(0, 0, `${heading ?? (observed ? 'CLI gözlemi\n' : '')}${heading ? '\n' : ''}${text}${sourceUrl ? ' ↗' : ''}`, { fontFamily: FONT, fontSize: '10px', color: observed ? '#245b48' : '#51475c', wordWrap: { width: 152 }, lineSpacing: 4 }).setResolution(4);
     const width = Math.max(88, label.width + 24), height = label.height + 20;
     const bg = this.scene.add.graphics().fillStyle(observed ? 0xe3fff0 : 0xfff8e8).fillRoundedRect(-width / 2, -height, width, height, 4);

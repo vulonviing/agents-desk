@@ -9,7 +9,11 @@ interface State {
 export const useAmbientConversation = create<State>((set,get)=>({
   conversation:null,
   receive(data,open=false) {
-    if (!data || open || get().conversation?.id === data.id) set({conversation:data});
+    if (!data) { set({conversation:null}); return; }
+    const current = get().conversation;
+    // later updates of the same thread keep the position it was opened at (sims walk, the popup must not jump)
+    if (open) set({conversation:data});
+    else if (current?.id === data.id) set({conversation:{...data,anchor:current.anchor}});
   },
   close:()=>set({conversation:null}),
 }));

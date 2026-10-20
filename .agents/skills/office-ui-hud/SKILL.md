@@ -13,6 +13,9 @@ Goal: the UI explains the office at a glance and never fights the canvas. React 
 - Chat text goes through the safe renderer `components/Chat/FormattedMessage.tsx` (paragraphs, headings, lists, emphasis, code, HTTPS links; never raw HTML).
 - Stores: `officeStore` (view/selection, `inMaster`), `chatStore`, `managersStore`. Services: `services/{api,agentAdapter}`; demo data only via `?demo=1`, labelled DEMO.
 
+## Chat panels (current)
+- `components/Chat/ChatShell.tsx` is the one chat layout (header, log, composer, reset); `ChatPanel` (agents/coordinators, with "Sime git" and "Resume kopyala") and `MasterChatPanel` use it. Master threads are keyed per CLI (`threadKey`). `officeStore.chatMemory` keeps a chat for 20 minutes after leaving its floor/office.
+
 ## Rules
 1. **Language**: UI text Turkish; code/comments English. Vocabulary: kat → ofis → oda; never "Emre/Fatma"-style names — characters are skills/projects.
 2. **Information hierarchy**: HUD/toolbar (global) > plates (where) > dock (details). Hover shows tooltip; click selects; Esc steps back (manager → station → agent → office).

@@ -6,10 +6,10 @@ export function chatTimeline(messages: ChatMessage[], events: Observation[]): Ti
   const sorted = [...events].sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));
   const kept: Observation[] = [];
   for (const event of sorted) {
-    if (event.kind === 'completed' || event.kind === 'error') {
-      // A Desk answer already communicates this outcome; retain external outcomes without a message.
-      const role = event.kind === 'completed' ? 'assistant' : 'error';
-      if (messages.some(m=>m.role===role && Math.abs(Date.parse(m.at)-Date.parse(event.at))<5000)) continue;
+    if (event.kind === 'completed') continue; // the answer in the chat already says the turn ended
+    if (event.kind === 'error') {
+      // A Desk error message already communicates this outcome; retain external errors without a message.
+      if (messages.some(m=>m.role==='error' && Math.abs(Date.parse(m.at)-Date.parse(event.at))<5000)) continue;
       const previous = kept.at(-1);
       if (previous?.kind === event.kind && previous.sessionId === event.sessionId &&
         Date.parse(event.at)-Date.parse(previous.at)<3000 &&

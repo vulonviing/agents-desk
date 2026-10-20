@@ -244,8 +244,6 @@ p { margin: 4px 0; overflow-wrap: anywhere; }
 
 /* ---- chat panel (left of the canvas) ---- */
 .chat-panel { width: 380px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-left: 1px solid var(--line); }
-.chat-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-.chat-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .chat-title strong { overflow-wrap: anywhere; }
 .chat-panel .chat-log { flex: 1; max-height: none; min-height: 0; border: 0; padding: 10px 12px; }
 .chat-panel .chat-input { padding: 10px 12px; border-top: 1px solid var(--line); }
@@ -303,3 +301,13 @@ p { margin: 4px 0; overflow-wrap: anywhere; }
 .ambient-turn p { margin: 0; font-size: 15px; line-height: 1.5; }
 .ambient-next { color: #c3c9d7; font-size: 12px; }
 .ambient-conversation > a { padding: 8px 12px; font-size: 12px; color: #b6d9ff; }
+
+/* chat header: avatar | title | close on the first row; the action buttons share the full second row equally */
+.chat-head { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 8px 12px; padding: 12px; border-bottom: 1px solid var(--line); }
+.chat-head .avatar { flex: none; background: transparent; border: 0; }
+.chat-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.chat-title strong { font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
+.chat-title .pill { white-space: nowrap; align-self: flex-start; }
+.chat-head-actions { grid-column: 1 / -1; display: flex; gap: 6px; }
+.chat-head-actions button { flex: 1 1 0; white-space: nowrap; }
+.chat-head-actions button { font-size: 12px; padding: 4px 10px; }

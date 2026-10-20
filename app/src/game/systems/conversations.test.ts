@@ -32,3 +32,10 @@ it('conversation inspection reveals only spoken turns and retains them after com
  expect(d.transcriptFor('a')?.turns).toHaveLength(4);expect(d.transcriptFor('a')?.active).toBe(false);
  d.clear();expect(d.transcriptFor('a')).toBeUndefined();
 });
+
+it('after one conversation starts, no other starts for the quiet gap',()=>{
+ const d=new ConversationDirector(2),c={id:'c',pos:{x:1,y:0},busy:false},e={id:'e',pos:{x:2,y:0},busy:false};
+ expect(d.start(a,b,exchange,0)).toBe(true);
+ expect(d.canStart(c,e,5_000)).toBe(false);
+ expect(d.canStart(c,e,25_000)).toBe(true);
+});

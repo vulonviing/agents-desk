@@ -3,8 +3,12 @@ import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export function latestFlash(text) {
-  const models = text.split(/\r?\n/).map(s => s.split(/\s+/)[0]).filter(s => /^gemini-\d+(?:\.\d+)?-flash-low$/.test(s));
+// The newest Gemini FLASH of the requested effort (default medium); Pro/other tiers and other providers are never used.
+export const EFFORTS = ['low', 'medium', 'high'];
+export function latestFlash(text, effort = 'medium') {
+  if (!EFFORTS.includes(effort)) throw new Error('flash-model-required');
+  const pattern = new RegExp(`^gemini-\\d+(?:\\.\\d+)?-flash-${effort}$`);
+  const models = text.split(/\r?\n/).map(s => s.split(/\s+/)[0]).filter(s => pattern.test(s));
   models.sort((a, b) => b.localeCompare(a, 'en', { numeric: true }));
   if (!models.length) throw new Error('flash-unavailable');
   return models[0];
@@ -61,12 +65,12 @@ export function createAntigravityRunner({ dataDir, bin = process.env.DESK_AGY_BI
       child.stdin.end();
     });
   }
-  return async (system, input, schema, { model = 'latest-flash' } = {}) => {
+  return async (system, input, schema, { model = 'latest-flash', effort = 'medium' } = {}) => {
     let before = null;
     try { before = geminiQuota(JSON.parse(await command(['-p', '/usage', '--output-format', 'json', '--print-timeout', '10s'], { timeoutMs: 15_000 }))); } catch { /* token/call caps still apply */ }
     if (before && before.remaining < 0.1) throw new Error('antigravity-quota-low');
-    selected = model === 'latest-flash' ? latestFlash(await command(['models'], { timeoutMs: 15_000 })) : model;
-    if (!/^gemini-\d+(?:\.\d+)?-flash-low$/.test(selected)) throw new Error('flash-model-required');
+    selected = model === 'latest-flash' ? latestFlash(await command(['models'], { timeoutMs: 15_000 }), effort) : model;
+    if (!/^gemini-\d+(?:\.\d+)?-flash-(?:low|medium|high)$/.test(selected)) throw new Error('flash-model-required');
     const result = await command(['-p', `${system}\n\n${input}\nUse no tools, files, browsing, skills or delegation. Answer from supplied metadata only.`, '--model', selected,
       '--mode', 'plan', '--sandbox', '--disable-slash-commands', '--output-format', 'stream-json', '--json-schema', JSON.stringify(schema), '--print-timeout', '300s'], { stream: true });
     let after = null;

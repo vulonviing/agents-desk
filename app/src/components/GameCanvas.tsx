@@ -10,7 +10,7 @@ import { useOffice } from '../stores/officeStore';
 function hostState(): HostState {
   const s = useOffice.getState();
   const view = s.inMaster ? ({ kind: 'master', floorId: null } as const) : s.roomId && s.floorId ? ({ kind: 'room', floorId: s.floorId, roomId: s.roomId } as const) : s.floorId ? ({ kind: 'floor', floorId: s.floorId } as const) : null;
-  return { ...emptyState(), projects: s.projects, view, effectsEnabled: s.effectsEnabled, connection: s.connection, master: s.office?.managers?.find((m) => m.kind === 'master') ?? null, masterBusy: useManagers.getState().busyManagerId === 'manager:master', masterSpeech: useManagers.getState().threads['manager:master']?.messages.filter((m) => m.role === 'assistant').at(-1)?.text ?? '', managers: s.office?.managers ?? [], agents: s.office?.agents ?? [], observations: s.office?.observations ?? [], activity: s.office?.activity ?? null, live: s.office?.live ?? {}, selectedAgentId: s.selectedAgentId, selectedStationId: s.selectedStationId };
+  return { ...emptyState(), projects: s.projects, view, effectsEnabled: s.effectsEnabled, connection: s.connection, master: s.office?.managers?.find((m) => m.kind === 'master') ?? null, masterBusy: useManagers.getState().busyManagerId === 'manager:master', masterSpeech: useManagers.getState().threads[`${useManagers.getState().provider}:manager:master`]?.messages.filter((m) => m.role === 'assistant').at(-1)?.text ?? '', managers: s.office?.managers ?? [], agents: s.office?.agents ?? [], observations: s.office?.observations ?? [], activity: s.office?.activity ?? null, live: s.office?.live ?? {}, selectedAgentId: s.selectedAgentId, selectedStationId: s.selectedStationId };
 }
 
 const bridge: GameBridge = {

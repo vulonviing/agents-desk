@@ -68,7 +68,7 @@ async function api(t, { script = [] } = {}) {
     briefing: async () => ({ sources: [] }),
     manifestDir: mktmp(),
     projects: () => ({ floors: [{ id: 'f', name: 'F', rooms }] }),
-    loadConfig: () => ({ levels: { default: 'plan', 'Approve Room': 'approve' }, sessions: { projectsDir: sessions } }),
+    loadConfig: () => ({ levels: { default: 'plan', 'Approve Room': 'approve' }, sessions: { projectsDir: sessions }, dialogues: { batchesPerRefresh: 1 } }),
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   t.after(() => {
@@ -354,4 +354,32 @@ test('floor dialogue pools are shared across offices without creating a floor ma
   const state=(await call('GET','/api/office')).body;
   assert.equal(state.managers.filter(m=>m.kind==='master').length,1);
   assert.ok(!state.agents.some(a=>a.id.startsWith('manager:floor')));
+});
+
+test('resume command: only for a coordinator with a real session, one-click copyable, path safely quoted', async (t) => {
+  const { resumeCommand, shellQuote } = await import('../server/resume.js');
+  assert.equal(shellQuote("a'b"), "'a'\\''b'");
+  assert.equal(resumeCommand('claude', 'abc-12345678', '/p/My Proj'), "cd '/p/My Proj' && claude --resume abc-12345678");
+  assert.equal(resumeCommand('codex', 'abc-12345678', '/p'), "cd '/p' && codex resume abc-12345678");
+  const { call } = await api(t);
+  assert.equal((await call('GET', `/api/agents/${encodeURIComponent('nope#project')}/resume`)).status, 404);
+  assert.equal((await call('GET', `/api/agents/${encodeURIComponent('approve-room#project')}/resume`)).status, 404, 'no session yet');
+  const sent = await call('POST', `/api/agents/${encodeURIComponent('approve-room#project')}/chat`, { message: 'selam', provider: 'claude' });
+  assert.equal(sent.status, 200);
+  const r = await call('GET', `/api/agents/${encodeURIComponent('approve-room#project')}/resume?provider=claude`);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.match(r.body.command, /^cd '.*' && claude --resume chat-session-1$/);
+});
+
+test('a coordinator chat turn leaves a bounded CLI output log, like the Master', async (t) => {
+  const { call } = await api(t);
+  const id = 'approve-room#project';
+  const endpoint = `/api/agents/${encodeURIComponent(id)}/terminal`;
+  assert.deepEqual((await call('GET', endpoint)).body.entries, []);
+  assert.equal((await call('POST', `/api/agents/${encodeURIComponent(id)}/chat`, { message: 'selam', provider: 'claude' })).status, 200);
+  const entries = (await call('GET', endpoint)).body.entries;
+  assert.ok(entries.some((e) => e.kind === 'status' && e.text.includes('claude')));
+  assert.ok(entries.some((e) => e.kind === 'output'));
+  assert.ok(entries.every((e) => e.managerId === id && e.provider === 'claude'));
+  assert.deepEqual((await call('GET', endpoint + '?provider=codex')).body.entries, []);
 });

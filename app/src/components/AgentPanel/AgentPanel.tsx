@@ -16,7 +16,7 @@ export function AgentPanel({ agentId }: { agentId: string }) {
   const openChat = useOffice(s => s.openChat);
   if (!dto) return <p className="muted">Bu ajan artık yok.</p>;
   const stationName = (id: string | null) => room?.stations.find(s => s.id === id)?.name ?? id ?? '';
-  const flow = (observations ?? []).filter(e => e.roomId === dto.roomId && (dto.coordinator ? e.sessionId === dto.sessionId || e.coordinatorId === dto.id : e.to === dto.deskId || e.from === dto.deskId)).slice(-8).reverse();
+  const flow = (observations ?? []).filter(e => e.kind !== 'completed' && e.roomId === dto.roomId && (dto.coordinator ? e.sessionId === dto.sessionId || e.coordinatorId === dto.id : e.to === dto.deskId || e.from === dto.deskId)).slice(-8).reverse();
   return <div className="agent-panel">
     <div className="agent-head">
       <Avatar variant={dto.variant} />
@@ -30,7 +30,7 @@ export function AgentPanel({ agentId }: { agentId: string }) {
       <button type="button" onClick={() => gameApi.host?.focusAgent(dto.id)}>Simine git</button>
       {chatAgentId !== dto.id && <button type="button" className="primary" onClick={() => openChat(dto.id)}>Sohbeti aç</button>}
     </div>
-    {flow.length > 0 && <section><h3>İş akışı</h3>{flow.map(e => <p key={e.id} className="cli-observation">{e.kind === 'completed' ? '✔ Tur tamamlandı' : e.kind === 'error' ? '⛔ Tur kesildi' : e.kind === 'handoff' ? `${e.file}: ${stationName(e.from)} → ${stationName(e.to)}` : `${stationName(e.to)} · ${e.tool}`}<br /><small>{timeAgo(e.at)}</small></p>)}</section>}
+    {flow.length > 0 && <section><h3>İş akışı</h3>{flow.map(e => <p key={e.id} className="cli-observation">{e.kind === 'error' ? '⛔ Tur kesildi' : e.kind === 'handoff' ? `${e.file}: ${stationName(e.from)} → ${stationName(e.to)}` : `${stationName(e.to)} · ${e.tool}`}<br /><small>{timeAgo(e.at)}</small></p>)}</section>}
     <details className="agent-technical"><summary>Oturum ve teknik bilgiler</summary><dl className="facts">
       {dto.sessionId && <><dt>Oturum</dt><dd className="mono">{dto.sessionId.slice(-8)}</dd></>}
       {dto.model && <><dt>Model</dt><dd>{dto.model}</dd></>}

@@ -8,6 +8,8 @@ export interface ManagerThread {
   last: DispatchResult | null;
   error: string | null;
 }
+/** a Master conversation belongs to the CLI that answers it: switching CLI switches thread, nothing is reset */
+export const threadKey = (provider: 'claude' | 'codex', managerId: string) => `${provider}:${managerId}`;
 export const EMPTY_THREAD: ManagerThread = { messages: [], last: null, error: null };
 export interface DispatchOptions { targetId?: string; reconsider?: boolean; }
 interface ManagersState {
@@ -28,7 +30,7 @@ export const useManagers = create<ManagersState>((set, get) => ({
   setProvider(provider) {
     if (get().busy) return;
     try { localStorage.setItem('desk-cli', provider); } catch { /* optional preference */ }
-    set({ provider, threads: {} });
+    set({ provider });
   },
   busy: false,
   busyManagerId: null,
@@ -37,36 +39,37 @@ export const useManagers = create<ManagersState>((set, get) => ({
   applyTerminal(entry) { set((s) => ({ terminal: mergeEntries([...s.terminal, entry]) })); },
   async loadTerminal(managerId) {
     const provider = get().provider;
-    const r = await getJson<{ entries: ManagerCliEntry[] }>(`/api/managers/${encodeURIComponent(managerId)}/terminal?provider=${provider}`);
+    const r = await getJson<{ entries: ManagerCliEntry[] }>(`/api/${managerId.startsWith('manager:') ? 'managers' : 'agents'}/${encodeURIComponent(managerId)}/terminal?provider=${provider}`);
     set((s) => ({ terminal: mergeEntries([...s.terminal, ...r.entries]) }));
   },
   async dispatch(text, managerId = 'manager:master', options = {}) {
     if (get().busy) return null;
     const { provider } = get();
-    const thread = get().threads[managerId] ?? EMPTY_THREAD;
+    const key = threadKey(provider, managerId);
+    const thread = get().threads[key] ?? EMPTY_THREAD;
     const push = (role: ManagerMessage['role'], text: string) => set((s) => {
-      const t = s.threads[managerId] ?? EMPTY_THREAD;
-      return { threads: { ...s.threads, [managerId]: { ...t, messages: [...t.messages, { role, text, at: new Date().toISOString() }].slice(-40) } } };
+      const t = s.threads[key] ?? EMPTY_THREAD;
+      return { threads: { ...s.threads, [key]: { ...t, messages: [...t.messages, { role, text, at: new Date().toISOString() }].slice(-40) } } };
     });
     set({ busy: true, busyManagerId: managerId });
-    set((s) => ({ threads: { ...s.threads, [managerId]: { ...thread, error: null } } }));
+    set((s) => ({ threads: { ...s.threads, [key]: { ...thread, error: null } } }));
     push('user', text);
     try {
       const r = await postJson<DispatchResult>('/api/dispatch', { text, provider, managerId, ...options, clarificationId: thread.last?.clarification?.id });
       const reply = r.clarification?.question ?? (r.plan ? r.plan.plan.summary : `${r.route.at(-1)?.target ?? 'İlgili'} ofisini buldum. ${r.route.at(-1)?.reason ?? ''}`);
       push('assistant', reply);
-      set((s) => ({ threads: { ...s.threads, [managerId]: { ...s.threads[managerId]!, last: r } } }));
+      set((s) => ({ threads: { ...s.threads, [key]: { ...s.threads[key]!, last: r } } }));
       if (options.targetId && r.go) useOffice.getState().enterRoom(r.go.roomId);
       return r;
     } catch (err) {
       const error = err instanceof Error ? err.message : 'Yöneticiye ulaşılamadı.';
       push('error', error);
-      set((s) => ({ threads: { ...s.threads, [managerId]: { ...s.threads[managerId]!, error } } }));
+      set((s) => ({ threads: { ...s.threads, [key]: { ...s.threads[key]!, error } } }));
       return null;
     } finally { set({ busy: false, busyManagerId: null }); }
   },
   clear(managerId = 'manager:master') {
     if (get().busyManagerId === managerId) return;
-    set((s) => ({ threads: { ...s.threads, [managerId]: EMPTY_THREAD } }));
+    set((s) => ({ threads: { ...s.threads, [threadKey(s.provider, managerId)]: EMPTY_THREAD } }));
   },
 }));

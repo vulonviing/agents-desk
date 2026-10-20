@@ -90,6 +90,8 @@ export class OfficeScene extends Phaser.Scene {
   private atmosphereInk: Phaser.GameObjects.Graphics | null = null;
   private infoLabel: Phaser.GameObjects.Text | null = null;
   private clocks: Phaser.GameObjects.Sprite[] = [];
+  private deptPlates = new Map<string, { text: Phaser.GameObjects.Text; label: string; on: boolean }>();
+  private racks: Phaser.GameObjects.Sprite[] = [];
   private lastAtmosphereTick = -1;
 
 
@@ -130,6 +132,7 @@ export class OfficeScene extends Phaser.Scene {
     this.syncAgents();
     this.updateMasterSpeech();
     this.updateSigns();
+    this.updateInfoObjects();
     this.animateObservations();
     for (const [id, a] of this.agents) a.setSelected(id === next.selectedAgentId);
   }
@@ -155,6 +158,7 @@ export class OfficeScene extends Phaser.Scene {
     this.atmosphere = createAtmosphere(); this.atmosphereInk?.destroy(); this.atmosphereInk = null;
     this.infoLabel?.destroy(); this.infoLabel = null; this.clocks = []; this.lastAtmosphereTick = -1;
     this.windows = [];
+    this.deptPlates.clear(); this.racks = [];
     this.skyPhase = '';
     for (const a of this.agents.values()) a.destroy();
     this.agents.clear();
@@ -179,6 +183,31 @@ export class OfficeScene extends Phaser.Scene {
     this.tilemap = null;
     if (this.mapKey) this.cache.tilemap.remove(this.mapKey);
     this.mapKey = '';
+  }
+
+  /**
+   * Information-carrying objects stay truthful (see the smart-objects skill):
+   *  - a numbered room's plate lights up while one of ITS skills is really being used (observed CLI work), so the application
+   *    pipeline 1 ▸ 2 ▸ 3 ▸ 4 shows where the work is right now;
+   *  - the server rack's LEDs run only while an observed CLI session is live in this view, otherwise they sleep.
+   */
+  private updateInfoObjects() {
+    const agents = this.currentAgents();
+    const busy = agents.filter(a => a.cliActive || a.waiting);
+    for (const z of this.layout?.departments ?? []) {
+      const plate = this.deptPlates.get(z.id);
+      if (!plate) continue;
+      const ids = new Set(z.stations.map(st => st.id));
+      const on = busy.some(a => (a.deskId && ids.has(a.deskId)) || (a.coordinator && a.targetStationId && ids.has(a.targetStationId)));
+      if (on === plate.on) continue;
+      plate.on = on;
+      plate.text.setText(on ? `● ${plate.label}` : plate.label).setBackgroundColor(on ? '#2f6b4f' : '#303044');
+    }
+    const live = busy.length > 0;
+    for (const rack of this.racks) {
+      if (live) { if (rack.anims.isPaused) rack.anims.resume(); rack.clearTint(); }
+      else { if (!rack.anims.isPaused) rack.anims.pause(); rack.setTint(0x6e7088); }
+    }
   }
 
   /** Windows show the real time of day (day / dusk / night) instead of a fixed sky. */
@@ -240,6 +269,7 @@ export class OfficeScene extends Phaser.Scene {
     this.buildSigns(floor);
     for (const z of this.layout?.openPlan ? [] : this.layout?.departments ?? []) {
       const text = this.add.text((z.x + z.w / 2) * T, (z.y === 0 ? 3 : z.y + 0.6) * T, `${/^\d$/.test(z.step) ? `${z.step} ▸ ` : ''}${z.name}`, { fontFamily: FONT, fontSize: '9px', color: '#fff8e8', backgroundColor: '#303044', padding: { x: 4, y: 2 } }).setOrigin(0.5, 0).setResolution(4).setDepth(1000);
+      this.deptPlates.set(z.id, { text, label: text.text, on: false });
       this.objects.push(text);
     }
     this.cam.setWorld(result.worldW, result.worldH);
@@ -269,6 +299,7 @@ export class OfficeScene extends Phaser.Scene {
         this.tweens.add({ targets: s, x: o.x + 6, y: o.y - 3, duration: 1800 + (o.x % 700), yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
       }
       if (p.anim === 'rack') {
+        this.racks.push(s);
         s.play('rack');
         s.anims.setProgress(Math.random());
       }
@@ -343,7 +374,7 @@ export class OfficeScene extends Phaser.Scene {
         s.setSpeechAction((text,threadId,observed,sourceUrl)=>{
           if(observed){this.bridge.onAgentClick(a.id);return;}
           if(threadId&&this.publishConversation(a.id,true)){this.conversationAgent=a.id;return;}
-          this.bridge.onConversation?.({id:`speech:${a.id}`,participants:[{id:a.id,name:a.name}],turns:[{speakerId:a.id,text}],active:false,sourceUrl},true);
+          this.bridge.onConversation?.({id:`speech:${a.id}`,anchor:this.screenAnchor([a.id]),participants:[{id:a.id,name:a.name}],turns:[{speakerId:a.id,text}],active:false,sourceUrl},true);
         });
         this.agents.set(a.id, s);
         this.placeInitial(a, s);
@@ -453,7 +484,7 @@ export class OfficeScene extends Phaser.Scene {
         observeAtmosphere(this.atmosphere, event.kind, this.time.now);
         const actor = this.state.agents.find(a => a.roomId === roomId && (a.id === event.coordinatorId || !!event.sessionId && a.coordinator && a.sessionId === event.sessionId)) ?? destination;
         if (actor) {
-          this.agents.get(actor.id)?.say(event.kind === 'completed' ? 'Tur tamamlandı.' : 'Tur kesildi.', true);
+          if (event.kind === 'error') this.agents.get(actor.id)?.say('Tur kesildi.', true);
           if (event.kind === 'completed') this.receiptPending.add(actor.id);
         }
         continue;
@@ -544,17 +575,17 @@ export class OfficeScene extends Phaser.Scene {
         } else {
           const kind: LineKind = w.doing === 'coffee' ? 'coffee' : w.doing === 'cooler' ? 'water' : w.doing === 'window' ? 'window' : w.doing === 'sofa' ? 'news' : 'desk';
           const line = this.ambientLine(officeId, kind, a.name, undefined, () => this.rand());
-          if (line) s.say(line.text, false, 8000, undefined, line.source?.url);
+          if (line) s.say(line.text, false, 5500, undefined, line.source?.url);
         }
       }
       // now and then a resident at an idle desk thinks aloud (ambient only, never real work)
       if (w.mode === 'seated' && !working) {
         const due = this.nextTalk.get(a.id);
-        if (due === undefined) this.nextTalk.set(a.id, this.time.now + 15000 + this.rand() * 30000);
+        if (due === undefined) this.nextTalk.set(a.id, this.time.now + 8000 + this.rand() * 12000);
         else if (this.time.now > due) {
           const line = this.ambientLine(a.roomId, 'desk', a.name, undefined, () => this.rand());
-          if (line) s.say(line.text, false, 8000, undefined, line.source?.url);
-          this.nextTalk.set(a.id, this.time.now + 100000 + this.rand() * 50000);
+          if (line) s.say(line.text, false, 5500, undefined, line.source?.url);
+          this.nextTalk.set(a.id, this.time.now + 30000 + this.rand() * 40000);
         }
       }
       if (w.mode === 'walking') {
@@ -623,7 +654,8 @@ export class OfficeScene extends Phaser.Scene {
     const actors=this.talkActors(),a=actors.get(aId),b=actors.get(bId);if(!a||!b||!this.conversations.canStart(a,b,this.time.now))return false;
     const first=this.state.agents.find(x=>x.id===aId),second=this.state.agents.find(x=>x.id===bId);if(!first||!second)return false;
     const scope=this.state.view?.kind==='floor'?`floor:${this.state.view.floorId}`:first.roomId;
-    const exchange=this.ambientLine(scope,'visit',first.name,second.name,()=>this.rand());
+    // most conversations are about real news; the rest fall back to ordinary office talk
+    const exchange=(this.rand()<0.7?this.ambientLine(scope,'visit',first.name,second.name,()=>this.rand(),Date.now(),true):null)??this.ambientLine(scope,'visit',first.name,second.name,()=>this.rand());
     return !!exchange&&this.conversations.start(a,b,exchange,this.time.now);
   }
   private stepConversations() {
@@ -637,13 +669,21 @@ export class OfficeScene extends Phaser.Scene {
     if(this.conversationAgent)this.publishConversation(this.conversationAgent);
     for(const id of result.ended){this.agents.get(id)?.clearAmbientSpeech();const w=this.workers.get(id);if(w?.doing==='visit')w.timer=Math.min(w.timer,1);}
   }
+  /** Viewport pixel position of the middle of the given sims (for popups placed next to them). */
+  private screenAnchor(ids: string[]) {
+    const pts = ids.map(id => this.agents.get(id)?.container).filter((c): c is Phaser.GameObjects.Container => !!c);
+    if (!pts.length) return undefined;
+    const cam = this.cameras.main, box = this.scale.canvasBounds;
+    const wx = pts.reduce((n, c) => n + c.x, 0) / pts.length, wy = pts.reduce((n, c) => n + c.y, 0) / pts.length - 20;
+    return { x: box.x + (wx - cam.worldView.x) * cam.zoom * (box.width / this.scale.width), y: box.y + (wy - cam.worldView.y) * cam.zoom * (box.height / this.scale.height) };
+  }
   private publishConversation(agentId: string, open = false) {
     const record = this.conversations.transcriptFor(agentId);
     if (!record) return false;
     const revision = `${record.id}:${record.turns.length}:${record.active}`;
     if (open || revision !== this.conversationRevision) {
       this.conversationRevision = revision;
-      this.bridge.onConversation?.({...record, turns:[...record.turns], participants:[record.a,record.b].map(id=>({id,name:this.state.agents.find(a=>a.id===id)?.name??'Sim'}))}, open);
+      this.bridge.onConversation?.({...record, anchor:this.screenAnchor([record.a,record.b]), turns:[...record.turns], participants:[record.a,record.b].map(id=>({id,name:this.state.agents.find(a=>a.id===id)?.name??'Sim'}))}, open);
     }
     return true;
   }
@@ -669,7 +709,7 @@ export class OfficeScene extends Phaser.Scene {
   private ambientLine(...args: Parameters<typeof pickLine>) {
     if (this.time.now < this.nextAmbientAt) return null;
     const line = pickLine(...args);
-    if (line) this.nextAmbientAt = this.time.now + 10000;
+    if (line) this.nextAmbientAt = this.time.now + 5000;
     return line;
   }
 
@@ -728,7 +768,7 @@ export class OfficeScene extends Phaser.Scene {
       if (state !== 'idle') {
         ink.fillStyle(state === 'error' ? 0xf18b88 : 0xa2e8be).fillRect(x + 11, y + 5, 2, 2);
         if (state === 'done') ink.fillStyle(0xfff8e8).fillRect(x + 3, y + 12, 9, 5);
-        label.setPosition(x - 20, y - 15).setText(state === 'done' ? '✔ Tur tamamlandı' : '⛔ Tur kesildi').setVisible(true);
+        label.setPosition(x - 20, y - 15).setText('⛔ Tur kesildi').setVisible(state === 'error');
       }
       if (!reduced && this.time.now < this.atmosphere.celebrationUntil) {
         ink.fillStyle(0xf1cf82);

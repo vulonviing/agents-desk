@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createBriefing, parseFeed, parseSearchFeed } from '../server/briefing.js';
+import { createBriefing, feedsOf, parseFeed, parseSearchFeed, STANDING_QUERIES, TOPICS } from '../server/briefing.js';
 import { createBriefingMcp } from '../server/briefing-mcp.js';
 import { tmp } from './helpers.js';
 const at = Date.parse('2026-10-20T10:00:00Z');
@@ -31,7 +31,7 @@ test('public feeds are cached and weather is requested only for a supplied locat
 });
 test('a failed feed produces an empty context and backs off instead of inventing news', async()=>{
   let calls=0;const b=createBriefing({dataDir:tmp(),now:()=>at,fetcher:async()=>{calls++;throw new Error('offline');}});
-  assert.deepEqual((await b.get({topic:'technology'})).sources,[]);await b.get({topic:'technology'});assert.equal(calls,1);
+  assert.deepEqual((await b.get({topic:'technology'})).sources,[]);await b.get({topic:'technology'});assert.equal(calls,feedsOf('technology').length);
 });
 
 test('role news searches preserve real publishers, dates and public links, rejecting private destinations',async()=>{
@@ -40,4 +40,17 @@ test('role news searches preserve real publishers, dates and public links, rejec
  const urls=[],b=createBriefing({dataDir:tmp(),now:()=>at,fetcher:async url=>{urls.push(url);return new Response(xml);}});
  const context=await b.get({topic:'business',queries:[{role:'CV',query:'hiring recruitment'}]});assert.ok(context.sources.some(s=>s.role==='CV'));assert.ok(urls.some(u=>u.startsWith('https://www.bing.com/news/search?')));
  await b.get({topic:'business',queries:[{role:'CV',query:'hiring recruitment'}]});assert.equal(urls.length,2);
+});
+
+test('the briefing covers AI, German and Turkish politics, tech and more; each feed only links to its own hosts; standing searches are always run',async()=>{
+ assert.ok(['ai','germany','turkey','technology','europe'].every(t=>TOPICS.includes(t)));
+ assert.ok(feedsOf('ai').length>=3&&feedsOf('germany').length>=3&&feedsOf('turkey').length>=2);
+ const tagesschau=feedsOf('germany')[0];
+ assert.equal(parseFeed(`<rss>${item(at,'https://www.tagesschau.de/inland/x')}${item(at,'https://www.bbc.com/news/y')}</rss>`,'germany',at,tagesschau).length,1);
+ const urls=[];const b=createBriefing({dataDir:tmp(),now:()=>at,fetcher:async url=>{urls.push(url);return new Response(url.includes('bing.com')?`<rss>${item(at,'https://example.com/n')}</rss>`:'<rss></rss>');}});
+ const r=await b.get({topics:['ai','germany'],standing:true});
+ assert.equal(urls.filter(u=>u.includes('bing.com/news/search')).length,STANDING_QUERIES.length);
+ assert.ok(STANDING_QUERIES.some(q=>/Elon Musk flying car/.test(q.query))&&STANDING_QUERIES.some(q=>/AfD/.test(q.query))&&STANDING_QUERIES.some(q=>/GPT/.test(q.query))&&STANDING_QUERIES.some(q=>/Gemini/.test(q.query)));
+ assert.ok(r.sources.every(s=>s.role==='genel'));
+ await assert.rejects(()=>b.get({topics:['ai','nonsense']}),/invalid-topic/);
 });

@@ -37,7 +37,7 @@ Use only to close the gaps above, and only if the user asks for it. Never requir
 
 ## Privacy and safety (hard rules)
 - Keep only tool names, project-relative file paths/safe basenames, event names, hashed session ids, timestamps, model. Never prompts, command bodies, tool output, secrets or transcript text; nothing persisted to disk.
-- CLI thread ids stay server-side (needed for validated resume); the browser sees private hashes.
+- CLI thread ids stay server-side (needed for validated resume); the browser sees private hashes. The one exception is the user's explicit "Resume kopyala" click (`GET /api/agents/:id/resume`, loopback, validated, shell-quoted).
 - Failed tools, secret/outside paths and unknown tool formats never imply activity or document transfers.
 - emrecan-vps may be *observed*; nothing is ever run for it from the office.
 - Hooks (if installed) only observe: they never return permission decisions and never block the CLI.

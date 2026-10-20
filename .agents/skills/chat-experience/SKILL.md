@@ -1,11 +1,19 @@
 ---
 name: chat-experience
-description: Use when designing or changing the conversation UI with Master and coordinators: the left chat panel, how messages stream, tool/skill activity cards ("cv-search çalışıyor…"), Markdown rendering, history, switching between chat and terminal, empty/error states, and how a chat turn is reflected on the sims. Not for the session model (coordinator-sessions) or the PTY (embedded-terminal).
+description: Use when designing or changing the conversation UI with Master and coordinators: the left chat panel, how messages stream, tool/skill activity cards ("cv-search çalışıyor…"), Markdown rendering, history, the Master's CLI-output toggle, empty/error states, and how a chat turn is reflected on the sims. Not for the session model (coordinator-sessions). There is no embedded terminal (user decision).
 ---
 
 # Chat experience
 
 Goal: talking to a coordinator feels like talking to that repo's real CLI session — and the office shows what the session is doing while you talk.
+
+## Decisions (user-approved, 2026-10-20)
+- **One session, one chat.** A coordinator conversation is a single CLI session resumed on every message (`--resume`/`resume`); never start a fresh session per message. It continues until the user presses **Yeni konuşma** — switching CLI, floor or office never resets it (the Master keeps one thread per CLI: `threadKey`).
+- **No accidental loss.** Leaving a floor/office by mistake does not end the chat: the panel is kept for a **keep-alive time (20 min, `desk-chat-keep-min`)** and reopens by itself when the user returns (`chatMemory` in `officeStore`); after the time it is not restored, and a chat closed on purpose is forgotten. The CLI session/history stays, so the user can still reopen it.
+- **Resume command.** A coordinator with a real session has a **"Resume kopyala"** button: it copies `cd '<project>' && claude --resume <id>` or `codex resume <id>` so the user continues the same session in their own terminal. Desk never types into a terminal. The real thread id is returned only by this explicit GET (loopback, validated, shell-quoted) — see `coordinator-sessions`.
+- **No "Tur tamamlandı" log.** Completed turns are not shown in the chat timeline, the profile "İş akışı" list, or as a sim bubble (the answer in chat is the signal); errors ("Tur kesildi") still show.
+- **CLI çıktısı toggle** is on every coordinator chat too (`GET /api/agents/:id/terminal`, same bounded log and SSE `manager-cli`; status/output/error only, never prompts).
+- **Master = coordinator layout.** The Master uses the same `ChatShell` (header, log, composer, "Yeni konuşma") as every coordinator, in the same left panel; only its routing choices ("Ofise git", clarification options) and a "CLI çıktısı" toggle are Master-specific.
 
 ## Layout (target)
 - Clicking a coordinator (or Master) opens a **chat panel on the left**; the canvas stays visible beside it and focuses the sim. The terminal (when available) opens in a pane at the top; chat and terminal are two views of the **same session** (toggle, not two sessions).
@@ -35,7 +43,7 @@ The sim reaction must never run ahead of, or without, a real event; no fake "wor
 - `visual-qa`: screenshots with chat left + canvas, an activity card, an error state, mobile bottom sheet, and the cv-search sequence (message → card → skill desk lights up → done).
 
 ## Read when needed
-- Session rules → `coordinator-sessions`; PTY → `embedded-terminal`; panel/layout rules → `office-ui-hud`; signals → `live-signals`.
+- Session rules → `coordinator-sessions`; panel/layout rules → `office-ui-hud`; signals → `live-signals`.
 
 ## Turn status clarity
 Merge real observation cards chronologically with messages; never append old outcomes below the latest user turn. Collapse duplicate terminal observations and omit an outcome already represented by a nearby Desk answer/error. Show one live indicator for busy or externally working state, replacing the separate typing bubble. Filter observations by bound provider and disable sends during external activity.

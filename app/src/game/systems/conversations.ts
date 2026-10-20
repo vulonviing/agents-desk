@@ -4,7 +4,8 @@ export interface Exchange { text: string; reply?: string; followUp?: string; ans
 export interface Participant { id: string; pos: Point; busy: boolean }
 export interface ConversationTranscript { id: string; a: string; b: string; turns: { speakerId: string; text: string }[]; active: boolean; source?: DialogueSource }
 interface Conversation { id: string; a: string; b: string; lines: string[]; nextAt: number; index: number; source?: DialogueSource; concept?: string }
-export const turnDuration = (text: string) => Math.max(6500,Math.min(11500,3000+text.length*95));
+// Reading pace of a chat bubble: about 20 characters per second plus a short beat (people talk, they do not give speeches)
+export const turnDuration = (text: string) => Math.max(3500,Math.min(7500,2200+text.length*50));
 export interface Speech { threadId:string; id: string; text: string; duration: number; source?: DialogueSource; concept?: string }
 
 /** Four timed turns, physical proximity, and interruption; no model calls or fabricated work. */
@@ -13,18 +14,21 @@ export class ConversationDirector {
   private sequence = 0;
   private history: ConversationTranscript[] = [];
   private cooldown = new Map<string, number>();
-  constructor(private readonly capacity = 2, private readonly wallNow = Date.now) {}
+  private lastStartAt = -Infinity;
+  // startGap: quiet time after any conversation begins, so talk is rare and never stacked in several places at once
+  constructor(private readonly capacity = 2, private readonly wallNow = Date.now, private readonly startGap = 25_000) {}
   holds(id: string) { return this.conversations.some(c => c.a === id || c.b === id); }
   partner(id: string) { const c=this.conversations.find(c=>c.a===id||c.b===id);return c ? c.a===id?c.b:c.a : null; }
   canStart(a: Participant, b: Participant, now: number) {
     return a.id !== b.id && !a.busy && !b.busy && Math.hypot(a.pos.x-b.pos.x,a.pos.y-b.pos.y) <= 3 &&
-      this.conversations.length < this.capacity && !this.holds(a.id) && !this.holds(b.id) &&
+      this.conversations.length < this.capacity && now - this.lastStartAt >= this.startGap && !this.holds(a.id) && !this.holds(b.id) &&
       now >= (this.cooldown.get(a.id) ?? 0) && now >= (this.cooldown.get(b.id) ?? 0);
   }
   start(a: Participant, b: Participant, exchange: Exchange, now: number) {
     if (!this.canStart(a,b,now)) return false;
     const lines = [exchange.text,exchange.reply,exchange.followUp,exchange.answer].filter((v): v is string => !!v);
     if (lines.length < 2) return false;
+    this.lastStartAt = now;
     const id = `conversation:${++this.sequence}`;
     this.history.push({id,a:a.id,b:b.id,turns:[],active:true,source:exchange.source});
     if(this.history.length>20)this.history.shift();
@@ -38,7 +42,7 @@ export class ConversationDirector {
       const invalid=!a || !b || a.busy || b.busy || Math.hypot(a.pos.x-b.pos.x,a.pos.y-b.pos.y)>3 || !!c.source && c.source.expiresAt <= this.wallNow();
       if (invalid || c.index >= c.lines.length && now >= c.nextAt) {
         const record=this.history.find(h=>h.id===c.id);if(record)record.active=false;
-        for (const id of [c.a,c.b]) { this.cooldown.set(id,now+60_000);ended.push(id); }
+        for (const id of [c.a,c.b]) { this.cooldown.set(id,now+20_000);ended.push(id); }
         return false;
       }
       if (now >= c.nextAt) {
@@ -53,6 +57,6 @@ export class ConversationDirector {
     return {speeches,ended};
   }
   transcriptFor(id: string) { return this.history.findLast(h=>h.a===id||h.b===id); }
-  clear() {this.conversations=[];this.cooldown.clear();this.history=[];}
+  clear() {this.lastStartAt=-Infinity;this.conversations=[];this.cooldown.clear();this.history=[];}
   debug() {return this.conversations.map(c=>({a:c.a,b:c.b,turn:c.index,total:c.lines.length}));}
 }

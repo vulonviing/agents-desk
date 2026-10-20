@@ -1,7 +1,6 @@
 import { LEVEL_TEXT } from '../../lib/format';
 import { selectRoom, useOffice, type PanelTab } from '../../stores/officeStore';
 import { AgentPanel } from '../AgentPanel/AgentPanel';
-import { ManagerPanel } from '../Managers/ManagerPanel';
 import { ActivityTab } from './ActivityTab';
 import { InfoTab } from './InfoTab';
 import { SessionsTab } from './SessionsTab';
@@ -18,7 +17,7 @@ export function DockPanel() {
   const setTab = useOffice((s) => s.setTab);
   const leaveRoom = useOffice((s) => s.leaveRoom);
   if (!open) return null;
-  if (managerId) return <aside className="dock manager-dock" aria-label="Yönetici paneli"><ManagerPanel key={managerId} managerId={managerId} /></aside>;
+  if (managerId) return null; // the Master talks in the same left chat panel as every coordinator
 
   if (!room) {
     return <aside className="dock">{agentId ? <AgentPanel agentId={agentId} /> : <p className="muted">Bir karaktere ya da ofise tıkla.</p>}</aside>;

@@ -45,6 +45,11 @@ Replace fixed weight tables (`IDLE_CHOICES`) with this scoring; keep the tables 
 | window | day/night (see `office-atmosphere`) | clock |
 An info binding must be **truthful**: no animation without the underlying event, and it must go away with it.
 
+## Implemented truthful bindings
+- Printer: prints on observed turn completion / error (`systems/atmosphere.ts`); coordinators queue at it (`receiptPending`).
+- Numbered room plates light up (`● 2 ▸ CV atölyesi`) while one of that room's skills (or a coordinator's target station) is observed working — the application pipeline shows where the work is (`OfficeScene.updateInfoObjects`).
+- Server rack LEDs run only while an observed CLI session is live in the view; otherwise they pause and dim.
+
 ## Rules
 0. Object use is **ambient life** unless a real signal says otherwise; it never implies CLI work (green diamond is reserved for observed work, see `agent-lifecycle`).
 1. Add objects by data (catalog entry + placement rule), not by special-casing characters.

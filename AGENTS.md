@@ -35,7 +35,6 @@ name the skills it must use in the prompt.
 | Character states, arriving/leaving, poses, ambient life vs real work, event → animation mapping | `agent-lifecycle` (+ `live-signals` if the source changes) → `visual-qa` |
 | Log watcher/observer, session binding, CLI hooks and installer, signal privacy | `live-signals` |
 | What a coordinator is, binding/resuming real CLI sessions, providers, delegation to skills, coordinator permissions | `coordinator-sessions` |
-| In-office terminal (PTY, xterm.js, WebSocket), "open in Terminal", terminal security | `embedded-terminal` (+ `coordinator-sessions`) |
 | Chat panel with Master/coordinators: layout, streaming, activity cards, Markdown, chat ↔ sim reflection | `chat-experience` → `visual-qa` |
 | Sprites, atlas, `gen-assets`, palette/size rules, licences and credits | `pixel-asset-pipeline` |
 | Tiled JSON, layers, collision, depth, GIDs, map tests | `tiled-map-pipeline` |
@@ -48,10 +47,10 @@ camera, lifecycle) is not "done" until `visual-qa` has run (Playwright screensho
 performance sample) and its report states what was and was not checked. Unit tests alone
 never close a visual change.
 
-**Pending direction (not yet in force):** coordinators becoming real, full-capability CLI sessions
-with an embedded terminal would change the read-only coordinator rules above. Those rules stay
-as written until the change is implemented together with an explicit update of this file; the
-design lives in `coordinator-sessions` and `embedded-terminal`.
+**Decision (2026-10-20): no embedded terminal.** Desk never hosts a terminal or a full-capability
+CLI session. The user's real terminal sessions are *observed*; Desk's own coordinator chat stays a
+read-only, single resumable session; to work in a real terminal the user presses "Resume kopyala"
+and pastes the command themselves. Do not add PTY/xterm code or `node-pty`.
 
 ## Workflow Logging
 
@@ -119,9 +118,15 @@ Append every completed chat-session step to `ai_usage/steps_logs.md`.
 
 ## Master and office coordinators (hard rule)
 
+- **One session per coordinator chat.** Every message resumes the same CLI session until the user presses "Yeni konuşma";
+  switching CLI, floor or office never resets it. Leaving a floor/office keeps the chat panel for a keep-alive time
+  (20 min, `desk-chat-keep-min`) and reopens it on return; a chat closed on purpose is not restored.
+- **Resume code.** "Resume kopyala" copies `cd '<project>' && claude --resume <id>` / `codex resume <id>`; the user pastes it
+  in their own terminal. This explicit click (`GET /api/agents/:id/resume`) is the only way a real thread id leaves the server.
+
 - There is exactly one Master; never create floor managers. Master routes directly to office ids.
   Floor ids are destination locations, not another model call or management layer.
-- Master’s simulated office is the default view. Clicking Master opens Chat and Terminal in the sidebar.
+- Master’s simulated office is the default view. Clicking Master opens its chat in the same left chat panel layout as every coordinator (`ChatShell`; the "CLI çıktısı" toggle replaces the old Terminal tab).
   The toolbar contains Master, floor navigation and CLI selection; never manager cards or chat inputs.
   Floor navigation starts expanded; no floor is highlighted while visiting Master.
 - Master offers up to two offices and an explanation alternative. An explicit offered choice navigates

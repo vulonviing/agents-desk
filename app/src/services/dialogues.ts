@@ -12,10 +12,13 @@ const RELOAD_MS = 10 * 60_000;
 const FALLBACK: Line[] = [
   { kind: 'coffee', text: 'Kahvenin kokusu koridora kadar geliyor.' }, { kind: 'water', text: 'Bir bardak su, sonra devam.' },
   { kind: 'window', text: 'Şu köşeye bir okuma koltuğu yakışırdı.' }, { kind: 'news', text: 'Bugünün haberlerine bir göz atayım.' },
-  { kind: 'visit', text: 'Bir dakikan var mı?', reply: 'Tabii, buyur.', followUp: 'Kısa cümle mi, somut bir örnek mi daha etkili?', answer: 'Bir örnek kalsın; cümleyi sonra kısaltırız.' }, { kind: 'desk', text: 'Yarın için not alayım.' },
+  { kind: 'desk', text: 'Yarın için not alayım.' },
 ];
 
 const pools = new Map<string, Pool>();
+// the same text is never repeated anywhere in the building for a while (offices share generic lines)
+const spokenAt = new Map<string, number>();
+const GLOBAL_REPEAT_MS = 10 * 60_000;
 const pool = (id: string): Pool => {
   let p = pools.get(id);
   if (!p) { p = { lines: FALLBACK, loadedAt: 0, loading: false, refreshing: false, recent: [], lastAt: new Map(), polls: 0 }; pools.set(id, p); }
@@ -45,10 +48,10 @@ export async function ensurePool(officeId: string, fetcher: (path: string) => Pr
 const fill = (t: string) => t.replace(/\s*\{(?:name|other)\},?\s*/g, ' ').replace(/\s+([,.!?])/g,'$1').trim();
 
 /** One line of the given kind for an office: not one of the last dozen used, preferring lines written for this agent. */
-export function pickLine(officeId: string, kind: LineKind, who: string, _other: string | undefined, rng: () => number, now = Date.now()): { text: string; reply?: string; followUp?: string; answer?: string; concept?: string; source?: DialogueSource } | null {
+export function pickLine(officeId: string, kind: LineKind, who: string, _other: string | undefined, rng: () => number, now = Date.now(), sourcedOnly = false): { text: string; reply?: string; followUp?: string; answer?: string; concept?: string; source?: DialogueSource } | null {
   const p = pool(officeId);
   void ensurePool(officeId);
-  const all = p.lines.filter((l) => l.kind === kind && (!l.source || l.source.expiresAt > now) && (!l.who || l.who === who) && now - (p.lastAt.get(l.text) ?? -Infinity) >= 60_000);
+  const all = p.lines.filter((l) => l.kind === kind && (sourcedOnly ? !!l.source : !l.source || true) && (!sourcedOnly || !!l.source) && (!l.source || l.source.expiresAt > now) && (!l.who || l.who === who) && now - (p.lastAt.get(l.text) ?? -Infinity) >= 60_000 && now - (spokenAt.get(l.text) ?? -Infinity) >= GLOBAL_REPEAT_MS);
   const fresh = all.filter((l) => !p.recent.includes(l.text));
   const own = fresh.filter((l) => l.who && l.who === who);
   const candidates = own.length && rng() < 0.6 ? own : fresh.filter((l) => !l.who || l.who === who);
@@ -58,12 +61,14 @@ export function pickLine(officeId: string, kind: LineKind, who: string, _other: 
   p.recent = p.recent.filter(t => t !== line.text);
   p.recent.push(line.text);
   p.lastAt.set(line.text, now);
+  spokenAt.set(line.text, now);
+  if (spokenAt.size > 600) for (const [text, at] of spokenAt) if (now - at >= GLOBAL_REPEAT_MS) spokenAt.delete(text);
   if (p.lastAt.size > 480) for (const [text, at] of p.lastAt) if (now - at >= 60_000) p.lastAt.delete(text);
   if (p.recent.length > 12) p.recent.shift();
   return { source: line.source, concept: line.concept, followUp: line.followUp ? fill(line.followUp) : undefined, answer: line.answer ? fill(line.answer) : undefined, text: fill(line.text), reply: line.reply ? fill(line.reply) : undefined };
 }
 
-export const resetDialogues = () => { for (const p of pools.values()) if (p.timer) clearTimeout(p.timer); pools.clear(); };
+export const resetDialogues = () => { spokenAt.clear(); for (const p of pools.values()) if (p.timer) clearTimeout(p.timer); pools.clear(); };
 
 /** Server push makes a completed slow refill visible immediately, without persistent polling. */
 export async function refreshLoadedPool(id: string, fetcher = getJson<{lines: Line[]; refreshing?: boolean}>) {

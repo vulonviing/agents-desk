@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentDTO, Approval, OfficeSnapshot, Plan, Projects, Run } from '../types';
 import { activeRunOf, approvalsOf, plansOf, useTasks } from './tasksStore';
 import { toAgent, useOffice } from './officeStore';
@@ -16,7 +16,7 @@ const run = (over: Partial<Run> = {}): Run => ({ id: 'r1', roomId: 'a', planId: 
 const approval = (id: string): Approval => ({ id, runId: 'r1', roomId: 'a', tool: 'Edit', summary: 'Edit: x', reason: '', stationId: null, createdAt: 't' });
 
 beforeEach(() => {
-  useOffice.setState({ projects: null, office: null, floorId: null, roomId: null, selectedAgentId: null, selectedStationId: null, panelOpen: false, movingIds: [], inMaster: true, floorsOpen: true });
+  useOffice.setState({ chatMemory: {}, chatAgentId: null, selectedManagerId: null, projects: null, office: null, floorId: null, roomId: null, selectedAgentId: null, selectedStationId: null, panelOpen: false, movingIds: [], inMaster: true, floorsOpen: true });
   useTasks.setState({ plans: {}, runs: {}, approvals: {}, logs: {}, routing: {}, errors: {}, drafts: {} });
 });
 
@@ -111,5 +111,50 @@ describe('tasks store', () => {
     useTasks.getState().setDraft('a', 'merhaba');
     useTasks.getState().setDraft('b', 'dünya');
     expect([useTasks.getState().drafts.a, useTasks.getState().drafts.b]).toEqual(['merhaba', 'dünya']);
+  });
+});
+
+describe('chat keep-alive when navigating away', () => {
+  const start = () => {
+    useOffice.getState().setProjects(projects());
+    useOffice.getState().applyOffice(snap([dto('a#project', { roomId: 'a', coordinator: true })]));
+    useOffice.getState().enterRoom('a');
+    useOffice.getState().selectAgent('a#project');
+    useOffice.getState().openChat('a#project');
+  };
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('reopens the same conversation when the user comes back to the office within the keep time', () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-20T10:00:00Z'));
+    start();
+    useOffice.getState().setFloor('f2'); // an accidental click on another floor
+    expect(useOffice.getState().chatAgentId).toBeNull();
+    vi.setSystemTime(new Date('2026-10-20T10:05:00Z'));
+    useOffice.getState().enterRoom('a');
+    expect(useOffice.getState().chatAgentId).toBe('a#project');
+    expect(useOffice.getState().selectedAgentId).toBe('a#project');
+  });
+  it('does not restore it after the keep time has passed, nor after the user closed it on purpose', () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-20T10:00:00Z'));
+    start();
+    useOffice.getState().leaveRoom();
+    vi.setSystemTime(new Date('2026-10-20T10:25:00Z')); // 20 minutes is the default
+    useOffice.getState().enterRoom('a');
+    expect(useOffice.getState().chatAgentId).toBeNull();
+    start();
+    useOffice.getState().openChat(null); // closed on purpose
+    useOffice.getState().leaveRoom();
+    useOffice.getState().enterRoom('a');
+    expect(useOffice.getState().chatAgentId).toBeNull();
+  });
+  it('keeps the Master conversation open when the user wanders off and returns', () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-20T10:00:00Z'));
+    useOffice.getState().setProjects(projects());
+    useOffice.getState().goMaster();
+    useOffice.getState().selectManager('manager:master');
+    useOffice.getState().setFloor('f1');
+    expect(useOffice.getState().selectedManagerId).toBeNull();
+    useOffice.getState().goMaster();
+    expect(useOffice.getState().selectedManagerId).toBe('manager:master');
   });
 });

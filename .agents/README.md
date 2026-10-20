@@ -13,5 +13,5 @@ Add project-specific skills here; keep `AGENTS.md` short and route to them.
 Skills: `office-art-direction`, `office-layout-design`, `building-shell`, `agent-lifecycle`,
 `smart-objects`, `live-signals`, `visual-qa` (mandatory gate), `pixel-asset-pipeline`,
 `office-atmosphere`, `tiled-map-pipeline`, `office-ui-hud`, `coordinator-sessions`,
-`embedded-terminal`, `chat-experience`, `architectural-planning`, `floor-interior-design`, `office-dialogues`. Each is one `SKILL.md`
+`chat-experience`, `architectural-planning`, `floor-interior-design`, `office-dialogues`. Each is one `SKILL.md`
 (English, < 500 lines; put long detail in `references/` and say when to read it).

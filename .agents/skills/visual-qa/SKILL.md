@@ -38,6 +38,13 @@ No visual/game change is finished until this has run. Say plainly what was and w
 - [ ] Performance: steady frame rate with the biggest office open (sample `game.loop.actualFps` over 5 s; target ≥ 55 on desktop, ≥ 30 mobile), draw objects culled when off-screen.
 - [ ] Mobile: HUD, dock and controls usable; no horizontal page scroll.
 
+## 3b. Live verification (real providers, not only fixtures) — only when the user asks
+The user decided (2026-10-20) that a live tour is not required by default; fixture-based QA is enough unless they ask. When asked, run these against the real desk (`npm run desk`) when dialogue, chat or live behaviour changed, and say which were fixture-only:
+- **Dialogues:** `/api/dialogues/status` shows model `gemini-*-flash-medium`, calls/tokens/quota points, `lastError: null`; every scope has a pool > 300 lines after the first scheduled round; pools refill ~3×/day; bubbles appear for visit, news (AI first), window, coffee/water; sources open the publisher link; no bubble claims real work.
+- **News:** AI headlines (new GPT/Gemini/Claude/Grok), German and Turkish politics and tech/Musk items appear in the briefing; political lines stay balanced.
+- **Chat:** one session across messages (same `--resume`), switching floor/office and back within 20 min reopens the chat, "Yeni konuşma" is the only reset, "Resume kopyala" puts a working command on the clipboard, the Master panel looks and behaves like a coordinator's.
+- **Live:** start a real session in a scratch project → sim arrives, plate of the used room lights up, racks run, printer prints at the end.
+
 ## 4. Golden images
 Keep reference screenshots under `app/qa/golden/` (committed only when the user asks). A change that alters a golden image must say why; unexplained diffs fail the gate.
 

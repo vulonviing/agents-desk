@@ -18,7 +18,14 @@ export function AmbientConversationPopup() {
   },[conversation?.id,close]);
   if(!conversation)return null;
   const name=(id:string)=>conversation.participants.find(p=>p.id===id)?.name??'Sim';
-  return <section ref={popup} className="ambient-conversation" role="dialog" aria-label="Simlerin konuşması">
+  // next to the speakers: right of them when there is room, else left; kept inside the viewport
+  const W = Math.min(360, window.innerWidth - 24), H = Math.min(420, window.innerHeight * 0.65), a = conversation.anchor;
+  const style = a ? {
+    left: Math.max(12, Math.min(window.innerWidth - W - 12, a.x + 40 + W > window.innerWidth ? a.x - 40 - W : a.x + 40)),
+    top: Math.max(12, Math.min(window.innerHeight - H - 12, a.y - H / 2)),
+    bottom: 'auto', transform: 'none',
+  } as const : undefined;
+  return <section ref={popup} className="ambient-conversation" style={style} role="dialog" aria-label="Simlerin konuşması">
     <header><strong>{conversation.participants.map(p=>p.name).join(' · ')}</strong><button type="button" onClick={close} aria-label="Konuşmayı kapat">✕</button></header>
     <div className="ambient-turns" aria-live="polite" aria-relevant="additions">
       {conversation.turns.map((turn,i)=><div className={`ambient-turn ${turn.speakerId===conversation.participants[1]?.id?'reply':''}`} key={i}><button className="ambient-speaker" title="Sim profilini aç" onClick={()=>{useOffice.getState().selectAgent(turn.speakerId);gameApi.host?.focusAgent(turn.speakerId);close();}}>{name(turn.speakerId)}</button><p>{turn.text}</p></div>)}

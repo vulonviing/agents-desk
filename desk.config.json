@@ -77,14 +77,17 @@
   "dialogues": {
     "enabled": true,
     "model": "latest-flash",
-    "refreshHours": 1.5,
-    "maxCallsPerDay": 160,
+    "refreshHours": 8,
+    "maxCallsPerDay": 400,
     "linesPerRefresh": 128,
-    "poolMax": 720,
+    "poolMax": 2000,
     "provider": "antigravity",
     "retryMinutes": 30,
-    "maxTokensPerDay": 12000000,
+    "maxTokensPerDay": 60000000,
     "reserveTokensPerCall": 80000,
-    "maxQuotaPointsPerDay": 30
+    "maxQuotaPointsPerDay": 60,
+    "effort": "medium",
+    "batchesPerRefresh": 5,
+    "warmAll": true
   }
 }

@@ -110,7 +110,7 @@ export function createChats({ onChange = () => {} } = {}) {
     state: id => { const entry = [...chats.entries()].filter(([key]) => key.endsWith(`:${id}`)).sort((a,b) => Number(busy.has(b[0])) - Number(busy.has(a[0])) || (b[1].at ?? '').localeCompare(a[1].at ?? ''))[0]; const chat = entry?.[1]; return chat ? { ...chat, messages: undefined, busy: busy.has(entry[0]), provider: entry[0].split(':')[0] } : null; },
     history: (id) => ({ messages: get(id).messages, busy: busy.has(id) }),
     reset: (id) => chats.delete(id),
-    async send(room, def, id, message, provider = 'claude', { resumeSessionId } = {}) {
+    async send(room, def, id, message, provider = 'claude', { resumeSessionId, onEvent = () => {} } = {}) {
       if (busy.has(id)) throw Object.assign(new Error('Bu ajan hâlâ bir önceki mesajı cevaplıyor.'), { status: 409 });
       const text = String(message ?? '').trim();
       if (text.length < 1 || text.length > MAX_MESSAGE) throw Object.assign(new Error(`Mesaj 1 ile ${MAX_MESSAGE} karakter arasında olmalı.`), { status: 400 });
@@ -125,10 +125,12 @@ export function createChats({ onChange = () => {} } = {}) {
       try {
         let reply, sessionId = chat.sessionId;
         if (provider === 'claude') {
+          onEvent({ kind: 'status', text: `claude -p ${chat.sessionId ? '--resume ' : ''}· araçlar salt-okunur` });
           ({ reply, sessionId } = await runChat(room, def, text, chat.sessionId));
+          onEvent({ kind: 'output', text: reply });
         } else {
           const schema = { type: 'object', properties: { reply: { type: 'string' }, ...(def.coordinator ? { stationId: { type: 'string' } } : {}) }, required: ['reply', ...(def.coordinator ? ['stationId'] : [])] };
-          const opts = { provider, cwd: room.path, persist: !!def.coordinator, sessionId: def.coordinator ? chat.sessionId : null, onSession: value => { if (!def.coordinator) return; chat.sessionId = sessionId = value; onChange({ id, roomId: room.id, provider, phase: 'session' }); } };
+          const opts = { provider, onEvent, cwd: room.path, persist: !!def.coordinator, sessionId: def.coordinator ? chat.sessionId : null, onSession: value => { if (!def.coordinator) return; chat.sessionId = sessionId = value; onChange({ id, roomId: room.id, provider, phase: 'session' }); } };
           const metadata = `${room.readmeSummary ?? ''}\n${(room.stations ?? []).map(s => `${s.id}: ${s.name} — ${s.description ?? ''}`).join('\n')}`;
           const answer = await runDecision(`${chatPrompt(room, def)}\nProje bağlamı:\n${metadata}\nAraçların kapalı. Dosyaları okuduğunu veya komut çalıştırdığını iddia etme.${def.coordinator ? ' İş için uygun skill varsa stationId alanına onun kimliğini yaz; aksi halde boş bırak. Skill çağrısını uygulama bir sonraki gerçek CLI turunda yapacak.' : ''}`, JSON.stringify(chat.messages.slice(-20)), schema, opts);
           reply = answer.reply;
@@ -146,6 +148,7 @@ export function createChats({ onChange = () => {} } = {}) {
         push('assistant', reply);
       } catch (err) {
         push('error', err.message);
+        onEvent({ kind: 'error', text: err.message });
         throw Object.assign(err, { status: 502 });
       } finally {
         chat.messages = chat.messages.slice(-MAX_HISTORY);
