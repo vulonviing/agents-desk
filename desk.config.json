@@ -76,10 +76,15 @@
   ],
   "dialogues": {
     "enabled": true,
-    "model": "haiku",
-    "refreshHours": 12,
-    "maxCallsPerDay": 10,
-    "linesPerRefresh": 36,
-    "poolMax": 120
+    "model": "latest-flash",
+    "refreshHours": 1.5,
+    "maxCallsPerDay": 160,
+    "linesPerRefresh": 128,
+    "poolMax": 720,
+    "provider": "antigravity",
+    "retryMinutes": 30,
+    "maxTokensPerDay": 12000000,
+    "reserveTokensPerCall": 80000,
+    "maxQuotaPointsPerDay": 30
   }
 }

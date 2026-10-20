@@ -89,3 +89,16 @@ test('observer excludes symlink logs and supports disabling external observation
   assert.equal(f.observer.poll(f.data, f.config, NOW).sessions.length, 0);
   assert.deepEqual(createObserver().poll(f.data, { sessions: { observeExternal: false } }, NOW), { live: {}, events: [] });
 });
+
+test('turn endings emit metadata-only completion/error events, never from inactivity or cold history', t => {
+  const f = fixture(t);
+  appendFileSync(f.file, rec('assistant', { message: { stop_reason: 'end_turn', content: 'SECRET CHAT' } }, NOW));
+  assert.equal(f.observer.poll(f.data, f.config, NOW).events.length, 0);
+  appendFileSync(f.file, skill('tailor', NOW + 1000) + rec('assistant', { message: { stop_reason: 'end_turn', content: 'SECRET CHAT' } }, NOW + 1100));
+  const out = f.observer.poll(f.data, f.config, NOW + 3000);
+  const ended = out.events.filter(e => e.kind === 'completed');
+  assert.equal(ended.length, 1);
+  assert.equal(ended[0].to, 'skill:tailor');
+  assert.ok(!JSON.stringify(out).includes('SECRET'));
+  assert.equal(f.observer.poll(f.data, f.config, NOW + 10_000).events.filter(e => e.kind === 'completed').length, 1);
+});

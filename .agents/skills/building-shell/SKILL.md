@@ -43,3 +43,6 @@ Hierarchy everywhere (code, UI, signage): **building → floor (kat) → office 
 
 ## Read when needed
 - Interiors → `office-layout-design`. Map JSON/collision/depth → `tiled-map-pipeline`. Visitors and arrivals → `agent-lifecycle`.
+
+## Useful circulation
+Do not add a corridor merely to border a room or repeat an existing route. Every strip must connect a real destination; avoid unused perimeter gutters at floor and office levels.

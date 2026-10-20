@@ -40,7 +40,7 @@ name the skills it must use in the prompt.
 | Sprites, atlas, `gen-assets`, palette/size rules, licences and credits | `pixel-asset-pipeline` |
 | Tiled JSON, layers, collision, depth, GIDs, map tests | `tiled-map-pipeline` |
 | Day/night, ambient props, rare events, effects | `office-atmosphere` → `visual-qa` |
-| Ambient talk (coffee, news, visits), dialogue pool, Haiku refill, token budget | `office-dialogues` → `visual-qa` |
+| Ambient talk (coffee, news, visits), dialogue pool, Antigravity Flash refill, quota and token budget | `office-dialogues` → `visual-qa` |
 | React UI: HUD, toolbar, dock, chat rendering, tooltips, mobile, accessibility | `office-ui-hud` → `visual-qa` |
 
 **Hard rule:** any visual or game change (layout, sprites, furniture, characters, signs, HUD,
@@ -141,8 +141,8 @@ Append every completed chat-session step to `ai_usage/steps_logs.md`.
 ## Office life and observation
 
 - Ambient walking, breaks, and social bubbles continue while projects are inactive; they never imply real CLI work.
-  Ambient lines come from a per-office dialogue pool refilled rarely by Haiku (`server/dialogues.js`, `office-dialogues` skill);
-  never call a model per spoken line and never feed chat, prompt or transcript text into the pool.
+  Ambient lines come from per-office and shared-floor dialogue pools refilled by Antigravity Gemini Flash within persisted daily call/token/quota budgets (`server/dialogues.js`, `office-dialogues` skill);
+  never call a model per spoken line and never feed chat, prompt or transcript text into the pool. Public news/weather comes only through the Desk-owned briefing MCP; location requires browser permission, is rounded locally, and never reaches the dialogue model.
 - Green character diamonds represent observed CLI activity or Desk runs, not ambient motion or historical station hits.
 - `scanner/watch.js` watches Claude/Codex session roots and project `.agents`/`.claude` skill roots.
   Native notifications trigger debounced snapshots; no periodic transcript scan is allowed.

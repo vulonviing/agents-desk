@@ -151,7 +151,7 @@ export function createChats({ onChange = () => {} } = {}) {
         chat.messages = chat.messages.slice(-MAX_HISTORY);
         chats.set(id, chat);
         busy.delete(id);
-        onChange({ id, roomId: room.id, provider, phase: 'completed' });
+        onChange({ id, roomId: room.id, provider, phase: 'completed', ok: chat.messages.at(-1)?.role !== 'error' });
       }
       return chat.messages;
     },

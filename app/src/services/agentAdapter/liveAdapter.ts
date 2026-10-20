@@ -1,5 +1,6 @@
 import type { Approval, OfficeSnapshot, Plan, Projects, Run } from '../../types';
 import { getJson, postJson } from '../api';
+import { refreshLoadedPool } from '../dialogues';
 import type { AdapterHandlers, AgentAdapter } from './types';
 
 // Live data from the desk server: projects over REST, everything that changes over one server-sent-events
@@ -34,6 +35,7 @@ export function createLiveAdapter(): AgentAdapter {
       if (es?.readyState === EventSource.CLOSED && !stopped) setTimeout(() => { es?.close(); connect(); }, 3000);
     });
     on<import('../../types').ManagerCliEntry>('manager-cli', (e) => handlers?.onManagerCli?.(e));
+    on<{scope:string}>('dialogues', ({scope}) => { void refreshLoadedPool(scope); });
     on<Projects>('projects', (p) => handlers?.onProjects(p));
     on<OfficeSnapshot>('office', (s) => handlers?.onSnapshot(s));
     on<Plan>('plan', (payload) => handlers?.onTask({ type: 'plan', payload }));

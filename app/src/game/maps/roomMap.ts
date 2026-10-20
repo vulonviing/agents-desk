@@ -34,7 +34,8 @@ export function buildRoomMap(layout: RoomLayout, room: Room, floorId = '', floor
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const k = at(x, y);
     if (y < 2) {
-      walls[k] = themed ? themeGid(layout.theme, y === 0 ? 1 : 2) : faceGid(color, y === 0 ? 0 : 1);
+      const northRoom = layout.departments.find(z => z.y === 0 && x >= z.x && x < z.x + z.w);
+      walls[k] = themed ? themeGid(layout.theme, y === 0 ? 1 : 2) : faceGid(northRoom ? dressOf(northRoom.dress)?.wall ?? color : color, y === 0 ? 0 : 1);
       continue;
     }
     const zone = layout.departments.find(z => x >= z.x && x < z.x + z.w && y >= z.y && y < z.y + z.h);
@@ -54,11 +55,11 @@ export function buildRoomMap(layout: RoomLayout, room: Room, floorId = '', floor
   const books = room.skills.length || room.stations.length;
   const base = 34;
   sprite(p, books > 6 ? 'lz_shelf_books_b' : 'lz_shelf_books_a', 30, base + 4);
-  if (books > 12) sprite(p, 'lz_shelf_books_a', 76, base + 4);
+  if (books > 12 && layout.openPlan) sprite(p, 'lz_shelf_books_a', 76, base + 4);
   sprite(p, 'lz_window_white', layout.openPlan && layout.departments[0] && dressOf(layout.departments[0].dress)?.openBack ? 96 : 122, base - 4, { layer: 'wall' });
-  if (!(layout.openPlan && layout.departments[0] && dressOf(layout.departments[0].dress)?.openBack)) sprite(p, 'clock', 158, base - 10, { layer: 'wall' });
+  if (layout.openPlan && !(layout.openPlan && layout.departments[0] && dressOf(layout.departments[0].dress)?.openBack)) sprite(p, 'clock', 158, base - 10, { layer: 'wall' });
   sprite(p, 'door_office', layout.door.x * T + T, base + 2, { layer: 'wall' });
-  sprite(p, 'lz_plant_a', 18, base + 22);
+  if (layout.openPlan) sprite(p, 'lz_plant_a', 18, base + 22);
 
   // Every room has its own dress: back-wall art, corner pieces; rooms without one keep the generic wall furniture.
   for (const z of layout.departments) {
@@ -70,7 +71,7 @@ export function buildRoomMap(layout: RoomLayout, room: Room, floorId = '', floor
       continue;
     }
     const south = z.doorY === z.y; // door in the top wall: keep the back wall free there
-    const from = layout.openPlan ? z.x + 12 : z.x + 2, to = layout.openPlan ? z.x + z.w - 10 : z.x + z.w - (south ? 5 : 2);
+    const from = layout.openPlan ? z.x + 12 : z.y === 0 && z.coordinator ? z.x + 8 : z.x + 2, to = layout.openPlan ? z.x + z.w - 10 : z.x + z.w - (south ? 5 : 2);
     dress.back.forEach((frame, i) => sprite(p, frame, layout.openPlan && dress.openBack ? dress.openBack[i]! : (from + ((to - from) * (i + 0.5)) / dress.back.length) * T, (z.y + 3) * T - 2, { layer: 'wall' }));
     const bottom = (z.y + z.h - 1) * T - 3;
     const doorAtBottom = !south && !layout.openPlan;
@@ -113,6 +114,7 @@ export function buildRoomMap(layout: RoomLayout, room: Room, floorId = '', floor
       sprite(p, 'lz_rug_small_red', x + (pr.w * T) / 2, y + pr.h * T, { layer: 'floor' });
       sprite(p, 'lz_table_wood', x + (pr.w * T) / 2, y + pr.h * T - 4);
     }
+    if (pr.type === 'printer') sprite(p, 'printer', x + T / 2, y + T, { role: 'printer', roomId: room.id });
     if (pr.type === 'whiteboard') sprite(p, 'whiteboard', x + T, y + T + 8, { layer: 'wall' });
   }
   for (const sp of layout.spots) b.point(spotsLayer, sp.id, 'spot', sp.x * T + T / 2, sp.y * T + T, [prop('kind', sp.kind), prop('tx', sp.x), prop('ty', sp.y)]);

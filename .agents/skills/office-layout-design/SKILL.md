@@ -54,3 +54,6 @@ not a grid of furniture on a carpet. Skills are grouped into purpose-based depar
 - Changing the floor or building around offices → `building-shell`.
 - Adding a new object or behaviour → `smart-objects`.
 - New furniture sprite or map layer → `pixel-asset-pipeline`, `tiled-map-pipeline`.
+
+## No redundant corridors
+Use the central shared spine for department access. North departments meet the outer wall; no unused upper corridor. Reserve walkable desk approaches inside rooms and test every station/service from the entrance. A living area earns its footprint through reachable seating or activity, never decorative empty circulation.

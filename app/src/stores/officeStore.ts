@@ -13,6 +13,8 @@ export interface Hover {
 }
 
 interface OfficeState {
+  effectsEnabled: boolean;
+  toggleEffects(): void;
   projects: Projects | null;
   office: OfficeSnapshot | null;
   connection: ConnectionState;
@@ -54,6 +56,8 @@ interface OfficeState {
 const roomsOf = (p: Projects | null) => p?.floors.flatMap((f) => f.rooms) ?? [];
 
 export const useOffice = create<OfficeState>((set, get) => ({
+  effectsEnabled: true,
+  toggleEffects: () => set({ effectsEnabled: !get().effectsEnabled }),
   projects: null,
   office: null,
   connection: 'connecting',

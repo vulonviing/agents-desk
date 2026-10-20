@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import type { AgentDTO, Floor, Room } from '../../types';
+import type { AgentDTO, Floor, Room, Station } from '../../types';
 import { BG_COLOR, FONT, TILE } from '../constants';
 import { AgentSprite, type Visual } from '../entities/AgentSprite';
 import { emptyState, type GameBridge, type HostState } from '../bridge';
@@ -12,9 +12,12 @@ import { buildMasterMap, MASTER_ID } from '../maps/masterMap';
 import { buildRoomMap } from '../maps/roomMap';
 import { propsOf, type TiledMap, type TiledObjectLayer } from '../maps/tiled';
 import { CameraController } from '../systems/cameraController';
-import { CALM_CHOICES, createWorker, stepWorker, type Worker } from '../systems/behavior';
+import { createWorker, stepWorker, requestSpot, walkTo, type Worker } from '../systems/behavior';
 import { deliveryMode, type DeliveryMode } from '../systems/dispatch';
 import { findPath } from '../systems/pathfinding';
+import { createAtmosphere, observeAtmosphere, printerState, skyAt } from '../systems/atmosphere';
+import { ConversationDirector, type Participant } from '../systems/conversations';
+import { floorWalkLayout } from '../systems/floorLife';
 import { stationStatus } from '../systems/stationStatus';
 
 const T = TILE;
@@ -45,6 +48,15 @@ export class OfficeScene extends Phaser.Scene {
   private cells = new Map<string, { x: number; y: number; w: number; h: number }>(); // stationId → desk cell (room view)
   private layout: RoomLayout | null = null;
   private workers = new Map<string, Worker>();
+  private conversations = new ConversationDirector();
+  private nextEncounter = 0;
+  private walkLayout: RoomLayout | null = null;
+  private floorMapData: TiledMap | null = null;
+  private floorCells = new Map<string, { seat: { x: number; y: number }; access: { x: number; y: number } }>();
+  private floorHomes = new Map<string, { x: number; y: number }>();
+  private navKey = '';
+  private stationGroups = new Map<string, string>();
+
   private incoming = new Map<string, { until: number; mode: DeliveryMode }>();
   private pendingVisits = new Map<string, string>();
   private dispatchStyles = new Map<string, DeliveryMode>();
@@ -62,9 +74,21 @@ export class OfficeScene extends Phaser.Scene {
   private masterSpeech: Phaser.GameObjects.Container | null = null;
   private observedIds = new Set<string>();
   private speechKey = '';
+  private conversationAgent: string | null = null;
+  private conversationRevision = '';
+  private nextAmbientAt = 0;
   private nextTalk = new Map<string, number>();
   private windows: Phaser.GameObjects.Sprite[] = [];
   private skyPhase = '';
+  private transits = new Map<string, 'arriving' | 'leaving'>();
+  private seenSessions = new Map<string, string>();
+  private receiptPending = new Set<string>();
+  private atmosphere = createAtmosphere();
+  private atmosphereInk: Phaser.GameObjects.Graphics | null = null;
+  private infoLabel: Phaser.GameObjects.Text | null = null;
+  private clocks: Phaser.GameObjects.Sprite[] = [];
+  private lastAtmosphereTick = -1;
+
 
   constructor() {
     super('office');
@@ -121,12 +145,17 @@ export class OfficeScene extends Phaser.Scene {
     this.masterSpeech?.destroy(true);
     this.masterSpeech = null;
     this.speechKey = '';
-    this.nextTalk.clear();
+    this.nextTalk.clear(); this.nextAmbientAt = 0;
+    this.conversationAgent = null; this.conversationRevision = ''; this.bridge.onConversation?.(null);
+    this.transits.clear(); this.seenSessions.clear(); this.receiptPending.clear();
+    this.atmosphere = createAtmosphere(); this.atmosphereInk?.destroy(); this.atmosphereInk = null;
+    this.infoLabel?.destroy(); this.infoLabel = null; this.clocks = []; this.lastAtmosphereTick = -1;
     this.windows = [];
     this.skyPhase = '';
     for (const a of this.agents.values()) a.destroy();
     this.agents.clear();
-    this.workers.clear();
+    this.workers.clear(); this.conversations.clear(); this.nextEncounter = 0;
+    this.walkLayout = null; this.floorMapData = null; this.floorCells.clear(); this.floorHomes.clear(); this.navKey = ''; this.stationGroups.clear();
     this.coordinatorHomes.clear();
     this.incoming.clear();
     this.pendingVisits.clear();
@@ -150,7 +179,7 @@ export class OfficeScene extends Phaser.Scene {
 
   /** Windows show the real time of day (day / dusk / night) instead of a fixed sky. */
   private updateSky(hour = new Date().getHours()) {
-    const phase = hour >= 7 && hour < 17 ? 'day' : hour >= 17 && hour < 20 || hour === 6 ? 'dusk' : 'night';
+    const phase = skyAt(hour);
     if (phase === this.skyPhase) return;
     this.skyPhase = phase;
     for (const w of this.windows) w.setFrame(`window_${phase}`);
@@ -202,10 +231,11 @@ export class OfficeScene extends Phaser.Scene {
       this.layout = layoutRoom(room);
       result = buildRoomMap(this.layout, room, view.floorId, floorIndex);
     }
+    this.floorMapData = view.kind === 'floor' ? result.map : null;
     this.materialize(result.map, result.worldW, result.worldH);
     this.buildSigns(floor);
     for (const z of this.layout?.openPlan ? [] : this.layout?.departments ?? []) {
-      const text = this.add.text((z.x + z.w / 2) * T, (z.y + 0.6) * T, `${/^\d$/.test(z.step) ? `${z.step} ▸ ` : ''}${z.name}`, { fontFamily: FONT, fontSize: '9px', color: '#fff8e8', backgroundColor: '#303044', padding: { x: 4, y: 2 } }).setOrigin(0.5, 0).setResolution(4).setDepth(1000);
+      const text = this.add.text((z.x + z.w / 2) * T, (z.y === 0 ? 3 : z.y + 0.6) * T, `${/^\d$/.test(z.step) ? `${z.step} ▸ ` : ''}${z.name}`, { fontFamily: FONT, fontSize: '9px', color: '#fff8e8', backgroundColor: '#303044', padding: { x: 4, y: 2 } }).setOrigin(0.5, 0).setResolution(4).setDepth(1000);
       this.objects.push(text);
     }
     this.cam.setWorld(result.worldW, result.worldH);
@@ -226,6 +256,7 @@ export class OfficeScene extends Phaser.Scene {
     for (const o of layer('furniture')) {
       const p = propsOf(o);
       const s = this.add.sprite(o.x, o.y, 'props', String(p.frame)).setOrigin(0.5, 1);
+      if (p.frame === 'clock') this.clocks.push(s);
       if (String(p.frame).startsWith('lz_window')) this.windows.push(s);
       if (p.flipX) s.setFlipX(true);
       s.setDepth(typeof p.depth === 'number' ? p.depth : p.layer === 'floor' ? 0.5 : p.layer === 'wall' ? 1 : o.y);
@@ -240,7 +271,11 @@ export class OfficeScene extends Phaser.Scene {
       if (p.role === 'monitor') this.monitors.push({ sprite: s, roomId: p.roomId as string | undefined, stationId: p.stationId as string | undefined });
       this.objects.push(s);
     }
-    for (const o of layer('desks')) this.seats.set(String(propsOf(o).roomId), { x: o.x, y: o.y });
+    for (const o of layer('desks')) {
+      const p=propsOf(o),id=String(p.roomId);
+      this.seats.set(id, {x:o.x,y:o.y});
+      if(typeof p.tx==='number' && typeof p.ty==='number')this.floorCells.set(id,{seat:{x:p.tx+2,y:p.ty},access:{x:p.tx+2,y:p.ty-1}});
+    }
     for (const o of layer('stations')) {
       const p = propsOf(o);
       this.seats.set(String(p.stationId), { x: o.x, y: o.y });
@@ -279,18 +314,20 @@ export class OfficeScene extends Phaser.Scene {
     return residents;
   }
 
-  private indexInRoom(a: AgentDTO): number {
-    return this.currentAgents().filter((x) => x.roomId === a.roomId).findIndex((x) => x.id === a.id);
-  }
-
   private syncAgents() {
     const want = this.currentAgents();
     const ids = new Set(want.map((a) => a.id));
     for (const [id, sprite] of this.agents) {
       if (!ids.has(id)) {
+        if (this.transits.get(id) === 'leaving') continue;
+        const w = this.workers.get(id);
+        const entry = this.entryTile();
+        if (this.layout && w && entry && this.seenSessions.has(id) && walkTo(w, this.layout, entry, { kind: 'visit', id: 'exit' })) {
+          sprite.setActive(false); this.transits.set(id, 'leaving'); continue;
+        }
         sprite.destroy();
         this.agents.delete(id);
-        this.workers.delete(id);
+        this.workers.delete(id); this.nextTalk.delete(id); this.receiptPending.delete(id);
         this.coordinatorHomes.delete(id); this.coordinatorGoals.delete(id); this.dispatchStyles.delete(id);
         for (const [station, owner] of this.pendingVisits) if (owner === id) this.pendingVisits.delete(station);
       }
@@ -310,12 +347,27 @@ export class OfficeScene extends Phaser.Scene {
         if (seat) s.setFeet(seat.x, seat.y);
         s.setVisual(this.state.masterBusy ? 'think-seated' : 'work', 'down');
       }
-      s.setActive(!!a.cliActive);
+      if (this.transits.get(a.id) === 'leaving') this.transits.delete(a.id);
+      if (a.sessionId && this.seenSessions.get(a.id) !== a.sessionId && this.layout) {
+        this.seenSessions.set(a.id, a.sessionId);
+        const w = this.workers.get(a.id), entry = this.entryTile();
+        const goal = this.coordinatorHomes.get(a.id);
+        if (w && entry && goal) {
+          w.pos = entry;
+          if (walkTo(w, this.layout, goal, { kind: 'visit', id: 'arrival' })) {
+            this.transits.set(a.id, 'arriving'); s.setFeet(entry.x * T + T / 2, entry.y * T + T);
+          }
+        }
+      }
+      s.setActive(!!a.cliActive); if(a.waiting)s.clearAmbientSpeech();
       if (this.state.view?.kind === 'floor') this.applyFloorVisual(a, s);
     }
+    this.syncWalkLayout(want);
   }
 
   private visualOf(a: AgentDTO): Visual {
+    if (a.waiting) return 'wait';
+    if (a.cliActive && /^(Read|Grep|Glob)$/.test(a.observation?.tool ?? '')) return 'read';
     switch (a.status) {
       case 'working': return 'work';
       case 'thinking': return a.waiting ? 'wait' : 'think';
@@ -343,7 +395,7 @@ export class OfficeScene extends Phaser.Scene {
         let x = Math.min(this.layout.tilesW - 3, home.x);
         while (!this.layout.grid[home.y]?.[x] && x > 1) x--;
         const w = createWorker(a.id, this.layout, this.layout.stations[0]!.station.id);
-        w.pos = { x, y: home.y }; w.mode = 'doing'; w.stationId = null; w.doing = 'visit'; w.path = [];
+        w.home = `@coord:${a.id}`; w.pos = { x, y: home.y }; w.mode = 'doing'; w.stationId = null; w.doing = 'visit'; w.path = [];
         this.workers.set(a.id, w); this.coordinatorHomes.set(a.id, { ...w.pos });
         const seat = this.seats.get(`coordination:${a.roomId}:${ordinal}`);
         s.setFeet(seat?.x ?? x * T + T / 2, seat?.y ?? home.y * T + T); return;
@@ -388,6 +440,15 @@ export class OfficeScene extends Phaser.Scene {
       const destination = this.state.agents.find(a => a.roomId === roomId && a.deskId === event.to);
       const target = destination && this.agents.get(destination.id);
       const targetSeat = this.seats.get(event.to);
+      if (event.kind === 'completed' || event.kind === 'error') {
+        observeAtmosphere(this.atmosphere, event.kind, this.time.now);
+        const actor = this.state.agents.find(a => a.roomId === roomId && (a.id === event.coordinatorId || !!event.sessionId && a.coordinator && a.sessionId === event.sessionId)) ?? destination;
+        if (actor) {
+          this.agents.get(actor.id)?.say(event.kind === 'completed' ? 'Tur tamamlandı.' : 'Tur kesildi.', true);
+          if (event.kind === 'completed') this.receiptPending.add(actor.id);
+        }
+        continue;
+      }
       if (event.kind === 'activation') { target?.say(`${event.provider === 'codex' ? 'Codex' : 'Claude'} · ${event.tool}`, true); continue; }
       const sourceSeat = event.from && this.seats.get(event.from);
       if (!sourceSeat || !targetSeat) continue;
@@ -415,44 +476,65 @@ export class OfficeScene extends Phaser.Scene {
   // ---------- frame loop ----------
 
   update(_time: number, delta: number) {
+    if (document.hidden) return;
     const zoom = this.cameras.main.zoom;
     if (Math.abs(zoom - this.signZoom) > 0.01) {
       this.signZoom = zoom;
       for (const sg of this.signs) sg.rescale(zoom);
     }
     this.updateSky();
+    this.updateAtmosphere();
     for (const s of this.agents.values()) s.updateSpeech();
-    if (this.state.view?.kind === 'floor') { this.animateFloorLife(_time); return; }
+    this.stepConversations();
+    if (this.state.view?.kind === 'floor') { this.animateFloorLife(Math.min(0.1, delta / 1000)); return; }
     if (this.state.view?.kind !== 'room' || !this.layout) return;
     const dt = Math.min(0.1, delta / 1000);
+    this.stepTransits(dt);
     const moving: string[] = [];
+    const occupants = [...this.workers.values()];
+    const busyIds = new Set(this.currentAgents().filter(a => a.cliActive || a.waiting).map(a => a.id));
     for (const a of this.currentAgents()) {
       const s = this.agents.get(a.id);
       const w = this.workers.get(a.id);
       if (!s || !w) continue;
+      if (this.conversations.holds(a.id)) { this.poseConversation(a.id, s, w); continue; }
+      if (this.transits.has(a.id)) { moving.push(a.id); continue; }
+      if (this.receiptPending.has(a.id) && !a.cliActive && !a.waiting) {
+        if (requestSpot(w, 'printer', { layout: this.walkLayout ?? this.layout, demand: null, sleeping: false, rng: () => this.rand(), workers: occupants })) this.receiptPending.delete(a.id);
+      }
+      if (a.cliActive || a.waiting) {
+        this.receiptPending.delete(a.id);
+        if (a.coordinator && (w.target?.kind === 'printer' || w.target?.kind === 'queue' || w.doing === 'printer' || w.doing === 'queue')) {
+          w.path = []; w.target = null; w.doing = null; this.coordinatorGoals.delete(a.id);
+        }
+      }
+      if (a.coordinator && (w.target?.kind === 'printer' || w.doing === 'printer' || w.doing === 'queue' || w.target?.kind === 'queue') && !a.cliActive && !a.waiting) {
+        const before = w.mode;
+        stepWorker(w, dt, { layout: this.walkLayout ?? this.layout, demand: null, sleeping: false, rng: () => this.rand(), workers: occupants });
+        s.setFeet(w.pos.x * T + T / 2, w.pos.y * T + T);
+        s.setVisual(w.mode === 'walking' ? 'walk' : w.doing === 'printer' ? 'printer' : 'queue', w.dir);
+        if (before === 'doing' && w.mode !== 'doing') { w.path = []; w.target = null; w.doing = null; this.coordinatorGoals.delete(a.id); }
+        continue;
+      }
       if (a.coordinator) { this.stepCoordinator(a, s, w, dt); if (w.mode === 'walking') moving.push(a.id); continue; }
       if (a.deskId && this.pendingVisits.has(a.deskId)) { s.setVisual('visit'); continue; }
       const notice = a.deskId ? this.incoming.get(a.deskId) : null;
       if (notice && notice.until > this.time.now) { s.setVisual(notice.mode === 'visit' ? 'visit' : 'sofa'); continue; }
       const delegated = this.currentAgents().some(c => c.coordinator && c.cliActive && c.targetStationId === a.deskId);
-      const working = !!a.cliActive || delegated;
+      const working = !!a.cliActive || a.waiting || delegated || a.status === 'completed' || a.status === 'error';
       const previousMode = w.mode;
-      stepWorker(w, dt, { layout: this.layout, demand: working ? a.deskId : null, sleeping: false, rng: () => this.rand(), weights: this.currentAgents().length > 3 ? CALM_CHOICES : undefined });
-      if (w.mode === 'doing' && previousMode !== 'doing') {
+      stepWorker(w, dt, { layout: this.walkLayout ?? this.layout, demand: working ? a.deskId : null, sleeping: false, rng: () => this.rand(), workers: occupants, busyIds, groupOf: id => this.stationGroups.get(id) });
+      if (w.mode === 'doing' && previousMode !== 'doing' && w.doing !== 'queue' && w.doing !== 'printer') {
         const neighbor = w.doing === 'visit' ? [...this.workers.values()].find(other => other.id !== w.id && other.stationId === w.spotId) : null;
         // ambient talk comes from the office's dialogue pool (picked locally, no model call per line)
         const officeId = this.state.view?.kind === 'room' ? this.state.view.roomId : a.roomId;
         const nb = neighbor ? this.state.agents.find(x => x.id === neighbor.id) : undefined;
         if (nb) {
-          const line = pickLine(officeId, 'visit', a.name, nb.name, () => this.rand());
-          if (line) {
-            s.say(line.text);
-            if (line.reply && !nb.cliActive) this.time.delayedCall(1800, () => this.agents.get(nb.id)?.say(line.reply!));
-          }
+          this.tryConversation(a.id, nb.id);
         } else {
           const kind: LineKind = w.doing === 'coffee' ? 'coffee' : w.doing === 'cooler' ? 'water' : w.doing === 'window' ? 'window' : w.doing === 'sofa' ? 'news' : 'desk';
-          const line = pickLine(officeId, kind, a.name, undefined, () => this.rand());
-          if (line) s.say(line.text);
+          const line = this.ambientLine(officeId, kind, a.name, undefined, () => this.rand());
+          if (line) s.say(line.text, false, 5500, undefined, line.source?.url);
         }
       }
       // now and then a resident at an idle desk thinks aloud (ambient only, never real work)
@@ -460,8 +542,8 @@ export class OfficeScene extends Phaser.Scene {
         const due = this.nextTalk.get(a.id);
         if (due === undefined) this.nextTalk.set(a.id, this.time.now + 15000 + this.rand() * 30000);
         else if (this.time.now > due) {
-          const line = pickLine(a.roomId, 'desk', a.name, undefined, () => this.rand());
-          if (line) s.say(line.text);
+          const line = this.ambientLine(a.roomId, 'desk', a.name, undefined, () => this.rand());
+          if (line) s.say(line.text, false, 5500, undefined, line.source?.url);
           this.nextTalk.set(a.id, this.time.now + 40000 + this.rand() * 50000);
         }
       }
@@ -482,10 +564,163 @@ export class OfficeScene extends Phaser.Scene {
         s.setVisual(working ? this.visualOf(a) : 'work', 'down');
       }
     }
+    this.encounterNearby();
     const key = moving.sort().join(',');
     if (key !== this.movingKey) {
       this.movingKey = key;
       this.bridge.onMoving(moving);
+    }
+  }
+
+  private syncWalkLayout(actors: AgentDTO[]) {
+    const key=actors.map(a=>a.id).join('|');
+    if(key===this.navKey&&this.walkLayout)return;
+    this.navKey=key;this.stationGroups.clear();
+    if(this.floorMapData){
+      const homes=actors.flatMap(a=>{
+        const feet=this.floorSeat(a);if(!feet)return [];
+        const idx=actors.filter(o=>o.roomId===a.roomId&&!o.coordinator).findIndex(o=>o.id===a.id);
+        const cell=this.floorCells.get(idx===0?a.roomId:`${a.roomId}:preview:${idx}`);
+        this.floorHomes.set(a.id,feet);this.stationGroups.set(a.id,a.roomId);
+        const seat=a.coordinator||!cell?{x:Math.round(feet.x/T-0.5),y:Math.round(feet.y/T-1)}:cell.seat;
+        return [{id:a.id,seat,access:a.coordinator||!cell?seat:cell.access}];
+      });
+      this.walkLayout=floorWalkLayout(this.floorMapData,homes);
+      for(const a of actors){
+        if(!this.workers.has(a.id))this.workers.set(a.id,createWorker(a.id,this.walkLayout,a.id));
+        if(a.coordinator){const seat=this.walkLayout.stations.find(s=>s.station.id===a.id)!.seat;this.floorHomes.set(a.id,{x:seat.x*T+T/2,y:seat.y*T+T});}
+      }
+    }else if(this.layout){
+      for(const z of this.layout.departments)for(const station of z.stations)this.stationGroups.set(station.id,z.id);
+      const coordination=actors.filter(a=>a.coordinator).flatMap(a=>{
+        const home=this.coordinatorHomes.get(a.id);if(!home)return [];
+        const id=`@coord:${a.id}`;this.stationGroups.set(id,'coordination');
+        return [{station:{id} as Station,tx:home.x,ty:home.y,seat:home,access:home}];
+      });
+      this.walkLayout={...this.layout,stations:[...this.layout.stations,...coordination]};
+    }
+  }
+
+  private talkActors() {
+    const actors=new Map<string,Participant>();
+    for(const a of this.currentAgents()){
+      const w=this.workers.get(a.id);if(!w)continue;
+      actors.set(a.id,{id:a.id,pos:w.pos,busy:!!a.cliActive||a.waiting||this.transits.has(a.id)||w.doing==='printer'||w.doing==='queue'});
+    }
+    return actors;
+  }
+  private tryConversation(aId:string,bId:string) {
+    const actors=this.talkActors(),a=actors.get(aId),b=actors.get(bId);if(!a||!b||!this.conversations.canStart(a,b,this.time.now))return false;
+    const first=this.state.agents.find(x=>x.id===aId),second=this.state.agents.find(x=>x.id===bId);if(!first||!second)return false;
+    const scope=this.state.view?.kind==='floor'?`floor:${this.state.view.floorId}`:first.roomId;
+    const exchange=this.ambientLine(scope,'visit',first.name,second.name,()=>this.rand());
+    return !!exchange&&this.conversations.start(a,b,exchange,this.time.now);
+  }
+  private stepConversations() {
+    const result=this.conversations.tick(this.time.now,this.talkActors());
+    for(const speech of result.speeches)this.agents.get(speech.id)?.say(speech.text,false,speech.duration,undefined,speech.source?.url);
+    if(this.conversationAgent)this.publishConversation(this.conversationAgent);
+    for(const id of result.ended){this.agents.get(id)?.clearAmbientSpeech();const w=this.workers.get(id);if(w?.doing==='visit')w.timer=Math.min(w.timer,1);}
+  }
+  private publishConversation(agentId: string, open = false) {
+    const record = this.conversations.transcriptFor(agentId);
+    if (!record) return false;
+    const revision = `${record.id}:${record.turns.length}:${record.active}`;
+    if (open || revision !== this.conversationRevision) {
+      this.conversationRevision = revision;
+      this.bridge.onConversation?.({...record, turns:[...record.turns], participants:[record.a,record.b].map(id=>({id,name:this.state.agents.find(a=>a.id===id)?.name??'Sim'}))}, open);
+    }
+    return true;
+  }
+
+  private poseConversation(id:string,sprite:AgentSprite,w:Worker) {
+    const partner=this.workers.get(this.conversations.partner(id)??'');
+    const dx=partner?partner.pos.x-w.pos.x:0,dy=partner?partner.pos.y-w.pos.y:0;
+    const dir=Math.abs(dx)>Math.abs(dy)?dx<0?'left':'right':dy<0?'up':'down';
+    sprite.setVisual(w.mode==='seated'?'work':'visit',dir);
+  }
+  private encounterNearby() {
+    if(this.time.now<this.nextEncounter)return;
+    this.nextEncounter=this.time.now+1000+this.rand()*1600;
+    const actors=[...this.talkActors().values()];
+    const offset=Math.floor(this.rand()*Math.max(1,actors.length));
+    for(let i=0;i<actors.length;i++){
+      const a=actors[(i+offset)%actors.length]!;if(a.busy||this.conversations.holds(a.id))continue;
+      for(const b of actors)if(this.conversations.canStart(a,b,this.time.now)&&this.rand()<0.3&&this.tryConversation(a.id,b.id))return;
+    }
+  }
+
+  private ambientLine(...args: Parameters<typeof pickLine>) {
+    if (this.time.now < this.nextAmbientAt) return null;
+    const line = pickLine(...args);
+    if (line) this.nextAmbientAt = this.time.now + 4000;
+    return line;
+  }
+
+  private entryTile() {
+    if (!this.layout) return null;
+    const x = this.layout.door.x, y = 3;
+    if (this.layout.grid[y]?.[x]) return { x, y };
+    return this.layout.coordinatorDesks[0]?.access ?? this.layout.stations[0]?.access ?? null;
+  }
+
+  private stepTransits(dt: number) {
+    if (!this.layout) return;
+    for (const [id, kind] of this.transits) {
+      const w = this.workers.get(id), sprite = this.agents.get(id);
+      if (!w || !sprite) { this.transits.delete(id); continue; }
+      stepWorker(w, dt, { layout: this.layout, demand: null, sleeping: false, rng: () => this.rand() });
+      sprite.setFeet(w.pos.x * T + T / 2, w.pos.y * T + T); sprite.setVisual('walk', w.dir);
+      if (w.mode === 'walking') continue;
+      this.transits.delete(id);
+      if (kind === 'leaving') {
+        sprite.destroy(); this.agents.delete(id); this.workers.delete(id); this.nextTalk.delete(id); this.receiptPending.delete(id);
+        this.coordinatorHomes.delete(id); this.coordinatorGoals.delete(id); this.seenSessions.delete(id);
+      } else { this.coordinatorGoals.delete(id); w.doing = null; }
+    }
+  }
+
+  private updateAtmosphere() {
+    const tick = Math.floor(this.time.now / 150);
+    if (tick === this.lastAtmosphereTick) return;
+    this.lastAtmosphereTick = tick;
+    const ink = this.atmosphereInk ??= this.add.graphics().setDepth(990);
+    const label = this.infoLabel ??= this.add.text(0, 0, '', { fontFamily: FONT, fontSize: '7px', color: '#f8f2df', backgroundColor: '#303044', padding: { x: 3, y: 2 } }).setResolution(4).setDepth(1000);
+    ink.clear(); label.setVisible(false);
+    if (this.state.effectsEnabled === false) return;
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const time = new Date();
+    // Clock hands report local wall time; no synthetic news or weather is displayed.
+    for (const clock of this.clocks) {
+      const x = clock.x, y = clock.y - 6;
+      const hand = (angle: number, length: number) => { ink.lineStyle(1, 0x343442).lineBetween(x, y, Math.round(x + Math.sin(angle) * length), Math.round(y - Math.cos(angle) * length)); };
+      hand(time.getMinutes() * Math.PI / 30, 4); hand((time.getHours() % 12 + time.getMinutes() / 60) * Math.PI / 6, 2);
+    }
+    if (this.layout && this.skyPhase !== 'day') {
+      ink.fillStyle(0xffda8b, 0.1);
+      for (const a of this.currentAgents()) if (a.cliActive || a.waiting) {
+        const sprite = this.agents.get(a.id); if (sprite) ink.fillEllipse(sprite.x, sprite.y - 8, 30, 14);
+      }
+    }
+    if (!reduced) for (const w of this.workers.values()) if (w.doing === 'coffee' && w.mode === 'doing') {
+      const x = w.pos.x * T + 12, y = w.pos.y * T - 17 - tick % 5;
+      ink.lineStyle(1, 0xf4e8cf, 0.6).lineBetween(x, y, x + 1, y - 4);
+    }
+    const printer = this.layout?.props.find(p => p.type === 'printer');
+    if (printer) {
+      const state = printerState(this.atmosphere, this.time.now), x = printer.tx * T, y = printer.ty * T;
+      if (state !== 'idle') {
+        ink.fillStyle(state === 'error' ? 0xf18b88 : 0xa2e8be).fillRect(x + 11, y + 5, 2, 2);
+        if (state === 'done') ink.fillStyle(0xfff8e8).fillRect(x + 3, y + 12, 9, 5);
+        label.setPosition(x - 20, y - 15).setText(state === 'done' ? '✔ Tur tamamlandı' : '⛔ Tur kesildi').setVisible(true);
+      }
+      if (!reduced && this.time.now < this.atmosphere.celebrationUntil) {
+        ink.fillStyle(0xf1cf82);
+        for (let i = 0; i < 6; i++) ink.fillRect(x - 12 + i * 6, y - 12 - (i * 3 + tick) % 12, 2, 2);
+      }
+    }
+    if (this.state.connection === 'reconnecting' || this.state.connection === 'offline') {
+      label.setPosition(this.cameras.main.worldView.centerX - 50, this.cameras.main.worldView.top + 12).setText('Bağlantı bekleniyor').setVisible(true);
     }
   }
 
@@ -502,7 +737,22 @@ export class OfficeScene extends Phaser.Scene {
 
   private stepCoordinator(a: AgentDTO, sprite: AgentSprite, w: Worker, dt: number) {
     if (!this.layout) return;
-    const station = a.cliActive ? this.layout.stations.find(s => s.station.id === a.targetStationId) : null;
+    if (!a.cliActive && !a.waiting && this.coordinatorGoals.get(a.id) === 'ambient' && this.walkLayout) {
+      const before=w.mode;
+      stepWorker(w,dt,{layout:this.walkLayout,demand:null,sleeping:false,rng:()=>this.rand(),workers:[...this.workers.values()],busyIds:new Set(this.currentAgents().filter(a=>a.cliActive||a.waiting).map(a=>a.id)),groupOf:id=>this.stationGroups.get(id)});
+      if(w.mode==='seated'){
+        const ordinal=this.currentAgents().filter(x=>x.coordinator).findIndex(x=>x.id===a.id),seat=this.seats.get(`coordination:${a.roomId}:${ordinal}`);
+        if(seat)sprite.setFeet(seat.x,seat.y);sprite.setVisual('work');
+      }else{sprite.setFeet(w.pos.x*T+T/2,w.pos.y*T+T);sprite.setVisual(w.mode==='walking'?'walk':w.doing as Visual,w.dir);}
+      if(w.mode==='doing'&&before!=='doing'){
+        const other=[...this.workers.values()].find(o=>o.id!==w.id&&o.stationId===w.spotId);
+        if(w.doing==='visit'&&other)this.tryConversation(w.id,other.id);
+        else if(w.doing!=='queue'){const kind:LineKind=w.doing==='coffee'?'coffee':w.doing==='cooler'?'water':w.doing==='window'?'window':w.doing==='sofa'?'news':'desk';const line=this.ambientLine(a.roomId,kind,a.name,undefined,()=>this.rand());if(line)sprite.say(line.text,false,5000,undefined,line.source?.url);}
+      }
+      return;
+    }
+    if ((a.cliActive || a.waiting) && this.coordinatorGoals.get(a.id)==='ambient') {w.target=null;w.doing=null;w.path=[];}
+    const station = a.cliActive || a.waiting ? this.layout.stations.find(s => s.station.id === a.targetStationId) : null;
     const home = this.coordinatorHomes.get(a.id)!;
     const key = station?.station.id ?? 'home';
     let style = this.dispatchStyles.get(a.id) ?? 'visit';
@@ -534,7 +784,8 @@ export class OfficeScene extends Phaser.Scene {
     const ordinal = this.currentAgents().filter(x => x.coordinator).findIndex(x => x.id === a.id);
     const seat = (key === 'home' || style !== 'visit') && !w.path.length ? this.seats.get(`coordination:${a.roomId}:${ordinal}`) : null;
     sprite.setFeet(seat?.x ?? w.pos.x * T + T / 2, seat?.y ?? w.pos.y * T + T);
-    sprite.setVisual(w.mode === 'walking' ? 'walk' : a.cliActive ? style === 'phone' ? 'sofa' : seat ? 'work' : 'think' : seat ? 'work' : 'visit', w.dir);
+    sprite.setVisual(w.mode === 'walking' ? 'walk' : a.waiting ? 'wait' : a.cliActive ? style === 'phone' ? 'sofa' : seat ? this.visualOf(a) : 'think' : seat ? 'work' : 'visit', w.dir);
+    if (!a.cliActive && !a.waiting && !w.path.length && key==='home') {w.mode='seated';w.stationId=w.home;w.doing=null;w.target=null;w.timer=20+this.rand()*30;this.coordinatorGoals.set(a.id,'ambient');}
     if (wasWalking && w.mode !== 'walking' && station && style === 'visit') this.notifyStation(a, station.station.id, style);
   }
 
@@ -554,28 +805,32 @@ export class OfficeScene extends Phaser.Scene {
 
   // Overview residents take short aisle breaks inside their own office. This is ambient life,
   // independent of tool activity; it never changes the server's actual working status.
-  private animateFloorLife(time: number) {
-    for (const a of this.currentAgents()) {
-      if (a.id.startsWith('manager:')) continue;
-      const s = this.agents.get(a.id);
-      const seat = this.floorSeat(a);
-      const zone = this.zones.find(z => z.roomId === a.roomId);
-      if (!s || !seat || !zone) continue;
-      if (a.status === 'working' || a.status === 'thinking') { s.setFeet(seat.x, seat.y); this.applyFloorVisual(a, s); continue; }
-      const seed = [...a.id].reduce((n, c) => n + c.charCodeAt(0), 0);
-      const phase = ((time / 1000 + seed) % 42);
-      if (phase < 19 || phase > 37) { s.setFeet(seat.x, seat.y); s.setVisual('work'); continue; }
-      // Exit north of the desk, walk along its aisle, pause, then retrace the same path.
-      const idx = this.indexInRoom(a);
-      const targetX = Math.max(zone.x + 20, Math.min(zone.x + zone.w - 20, seat.x + (idx % 2 ? -25 : 25)));
-      const aisleY = Math.max(zone.y + 45, seat.y - 29);
-      const progress = phase < 23 ? (phase - 19) / 4 : phase > 33 ? (37 - phase) / 4 : 1;
-      const corner = Math.min(1, progress * 2);
-      const along = Math.max(0, progress * 2 - 1);
-      s.setFeet(seat.x + (targetX - seat.x) * along, seat.y + (aisleY - seat.y) * corner);
-      s.setVisual(progress < 1 ? 'walk' : 'visit', phase > 33 ? 'down' : 'up');
-      if (phase >= 25 && phase < 25.12) { const line = pickLine(a.roomId, idx % 2 ? 'coffee' : 'window', a.name, undefined, () => this.rand()); if (line) s.say(line.text); }
+  private animateFloorLife(dt: number) {
+    if(!this.walkLayout)return;
+    const actors=this.currentAgents(),workers=[...this.workers.values()],busyIds=new Set(actors.filter(a=>a.cliActive||a.waiting).map(a=>a.id));
+    const moving:string[]=[];
+    for(const a of actors){
+      const sprite=this.agents.get(a.id),w=this.workers.get(a.id);if(!sprite||!w)continue;
+      if(this.conversations.holds(a.id)){this.poseConversation(a.id,sprite,w);continue;}
+      const before=w.mode,busy=busyIds.has(a.id);
+      stepWorker(w,dt,{layout:this.walkLayout,demand:busy?a.id:null,sleeping:false,rng:()=>this.rand(),workers,busyIds,groupOf:id=>this.stationGroups.get(id)});
+      if(w.mode==='seated'){
+        const seat=this.floorHomes.get(a.id);if(seat)sprite.setFeet(seat.x,seat.y);
+        sprite.setVisual(busy?this.visualOf(a):'work');
+      }else{
+        const x=w.pos.x*T+T/2,y=w.pos.y*T+T;
+        sprite.setFeet(sprite.x+(x-sprite.x)*0.45,sprite.y+(y-sprite.y)*0.45);
+        sprite.setVisual(w.mode==='walking'?'walk':w.doing as Visual,w.dir);
+        if(w.mode==='walking')moving.push(a.id);
+      }
+      if(w.mode==='doing'&&before!=='doing'&&w.doing!=='queue'){
+        const other=workers.find(o=>o.id!==w.id&&o.stationId===w.spotId);
+        if(w.doing==='visit'&&other)this.tryConversation(w.id,other.id);
+        else {const kind:LineKind=w.doing==='coffee'?'coffee':w.doing==='window'?'window':w.doing==='sofa'?'news':'desk';const line=this.ambientLine(`floor:${a.floorId}`,kind,a.name,undefined,()=>this.rand());if(line)sprite.say(line.text,false,5000,undefined,line.source?.url);}
+      }
     }
+    this.encounterNearby();
+    const key=moving.sort().join(',');if(key!==this.movingKey){this.movingKey=key;this.bridge.onMoving(moving);}
   }
 
   private rand(): number {
@@ -654,7 +909,10 @@ export class OfficeScene extends Phaser.Scene {
     if (this.cam.wasDrag || p.getDuration() > 500) return;
     const w = this.cameras.main.getWorldPoint(p.x, p.y);
     const hit = this.agentAt(w.x, w.y);
-    if (hit) return this.bridge.onAgentClick(hit.id);
+    if (hit) {
+      if(this.publishConversation(hit.id,true)){this.conversationAgent=hit.id;return;}
+      return this.bridge.onAgentClick(hit.id);
+    }
     if (this.state.view?.kind === 'master') {
       const z = this.zones[0];
       if (z && w.x >= z.x && w.x < z.x + z.w && w.y >= z.y && w.y < z.y + z.h) this.bridge.onAgentClick(MASTER_ID);
@@ -809,6 +1067,9 @@ export class OfficeScene extends Phaser.Scene {
       zoom: this.cameras.main.zoom,
       agents: [...this.agents.entries()].map(([id, a]) => ({ id, x: a.x, y: a.y, sx: (a.x - this.cameras.main.worldView.x) * this.cameras.main.zoom, sy: (a.y - 14 - this.cameras.main.worldView.y) * this.cameras.main.zoom, visible: a.container.visible, depth: a.container.depth, alpha: a.container.alpha, parts: a.container.list.map((o) => { const g = o as Phaser.GameObjects.Sprite; return { type: g.type, visible: g.visible, alpha: g.alpha, tex: g.texture?.key, frame: g.frame?.name, w: g.width, h: g.height }; }) })),
       workers: [...this.workers.entries()].map(([id, w]) => ({ id, mode: w.mode, station: w.stationId, doing: w.doing })),
+      conversations: this.conversations.debug(),
+      atmosphere: { sky: this.skyPhase, printer: printerState(this.atmosphere, this.time.now), enabled: this.state.effectsEnabled !== false },
+      transits: [...this.transits],
       seats: this.seats.size,
       objects: this.objects.length,
     };

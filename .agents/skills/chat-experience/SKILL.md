@@ -36,3 +36,6 @@ The sim reaction must never run ahead of, or without, a real event; no fake "wor
 
 ## Read when needed
 - Session rules → `coordinator-sessions`; PTY → `embedded-terminal`; panel/layout rules → `office-ui-hud`; signals → `live-signals`.
+
+## Turn status clarity
+Merge real observation cards chronologically with messages; never append old outcomes below the latest user turn. Collapse duplicate terminal observations and omit an outcome already represented by a nearby Desk answer/error. Show one live indicator for busy or externally working state, replacing the separate typing bubble. Filter observations by bound provider and disable sends during external activity.

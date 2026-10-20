@@ -53,8 +53,8 @@ async function api(t, { script = [] } = {}) {
   const planPath = mktmp();
   mkwrite(dir, 'plan.json', JSON.stringify({ summary: 'Ilani incele', steps: [{ stationId: 'skill:style', action: 'oku' }, { stationId: 'prep', action: 'uret' }, { stationId: 'ghost', action: 'x' }] }));
   mkwrite(dir, 'script.json', JSON.stringify(typeof script === 'function' ? script(apprPath) : script));
-  Object.assign(process.env, { DESK_CLAUDE_BIN: FAKE, DESK_FAKE_PLAN: pjoin(dir, 'plan.json'), DESK_FAKE_SCRIPT: pjoin(dir, 'script.json') });
-  t.after(() => ['DESK_CLAUDE_BIN', 'DESK_FAKE_PLAN', 'DESK_FAKE_SCRIPT'].forEach((k) => delete process.env[k]));
+  Object.assign(process.env, { DESK_AGY_BIN: pjoin(import.meta.dirname, 'fake-agy.mjs'), DESK_CLAUDE_BIN: FAKE, DESK_FAKE_PLAN: pjoin(dir, 'plan.json'), DESK_FAKE_SCRIPT: pjoin(dir, 'script.json') });
+  t.after(() => ['DESK_AGY_BIN', 'DESK_CLAUDE_BIN', 'DESK_FAKE_PLAN', 'DESK_FAKE_SCRIPT'].forEach((k) => delete process.env[k]));
   const mk = (id, name, path) => ({
     id, name, path, embedded: [], skills: [], triggers: [], lastCommit: null, level: 'plan',
     stations: [
@@ -65,6 +65,7 @@ async function api(t, { script = [] } = {}) {
   const rooms = [mk('approve-room', 'Approve Room', apprPath), mk('plan-room', 'Plan Room', planPath)];
   const server = createDeskServer({
     dataDir: dir,
+    briefing: async () => ({ sources: [] }),
     manifestDir: mktmp(),
     projects: () => ({ floors: [{ id: 'f', name: 'F', rooms }] }),
     loadConfig: () => ({ levels: { default: 'plan', 'Approve Room': 'approve' }, sessions: { projectsDir: sessions } }),
@@ -327,10 +328,30 @@ test('dialogues API: pool per office, validation, refill through the fake small 
   for (let i = 0; i < 60; i++) {
     await new Promise((r) => setTimeout(r, 100));
     second = await call('GET', '/api/dialogues?office=plan-room');
-    if (second.body.source === 'haiku') break;
+    if (second.body.source === 'antigravity') break;
   }
-  assert.equal(second.body.source, 'haiku');
-  assert.ok(second.body.lines.some((l) => l.text === 'Fake kahve molası.'));
+  assert.equal(second.body.source, 'antigravity');
+  assert.ok(second.body.lines.some((l) => l.text === 'Kahvenin kokusu koridora kadar geliyor.'));
   const status = await call('GET', '/api/dialogues/status');
-  assert.equal(status.body.usage.calls, 1);
+  assert.equal(status.body.usage.calls, 2);
+});
+
+test('weather location is opt-in, rounded, validated and removable', async t => {
+  const {call}=await api(t);
+  assert.equal((await call('GET','/api/dialogues/location')).body.configured,false);
+  assert.equal((await call('POST','/api/dialogues/location',{latitude:999,longitude:29})).status,400);
+  assert.equal((await call('POST','/api/dialogues/location',{latitude:41.012345,longitude:29.02345})).body.configured,true);
+  assert.deepEqual((await call('GET','/api/dialogues/location')).body,{configured:true});
+  assert.equal((await call('POST','/api/dialogues/location',{clear:true})).body.configured,false);
+});
+
+test('floor dialogue pools are shared across offices without creating a floor manager', async t => {
+  const {call}=await api(t);
+  const first=await call('GET','/api/dialogues?floor=f');
+  assert.equal(first.status,200);assert.equal(first.body.office,'floor:f');
+  assert.ok(first.body.lines.some(l=>l.kind==='visit'&&l.followUp&&l.answer));
+  assert.equal((await call('GET','/api/dialogues?floor=missing')).status,404);
+  const state=(await call('GET','/api/office')).body;
+  assert.equal(state.managers.filter(m=>m.kind==='master').length,1);
+  assert.ok(!state.agents.some(a=>a.id.startsWith('manager:floor')));
 });

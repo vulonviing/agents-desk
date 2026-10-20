@@ -59,3 +59,6 @@ Biophilic corridors (plants, natural motifs), functional murals and wayfinding g
 
 ## Read when needed
 - Circulation, access, sizes → `architectural-planning`, `building-shell`. Sprite mechanics → `pixel-asset-pipeline`. Look and finish → `office-art-direction`.
+
+## Living space before decorative space
+Decoration does not justify an unused corridor. Preserve the liked floor → office → room identity while removing redundant strips; keep social areas purposeful and accessible.

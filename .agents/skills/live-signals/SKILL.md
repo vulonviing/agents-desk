@@ -15,6 +15,10 @@ Current contract: `.agents/architecture.md` ("Event-driven observation") — rea
 - `scanner/{sessions,activity}.js` — working/waiting classification and tool → station mapping. Skill calls and SKILL.md reads establish station context; a new prompt clears it.
 - Server binds new sessions to coordinators (`server/coordinators.js`) and pushes SSE `office` frames.
 
+## Explicit turn endings
+- Passive observer now emits `completed` and `error` lifecycle metadata for supported turn-end records, without retaining response text. Suppress cold replay.
+- Watcher seeds existing top-level log metadata and deduplicates identical native file notifications, avoiding FSEvents creation replay as phantom extra updates. No periodic transcript scan was added.
+
 ## Known gaps (what extra signals could fix)
 - An interactive CLI that has not written a log yet is invisible; an idle terminal's exit is not detectable (sims expire after the retention window).
 - "Waiting for permission" is inferred from a stale pending tool call, not an explicit event.

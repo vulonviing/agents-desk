@@ -26,7 +26,7 @@ export function ActivityTab({ room }: { room: Room }) {
     <h3>Ajanlar · {residents.length}</h3>
     <p className="muted">Koordinatörler en üstte. Bir ajana tıklayarak simine git ve profilini aç.</p>
     <div className="stations agent-roster">
-      {residents.map(agent => <button key={agent.id} type="button" className={`station agent-row ${agent.cliActive ? 'live' : ''}`} onClick={() => { selectAgent(agent.id); gameApi.host?.focusAgent(agent.id); }}>
+      {residents.map(agent => <button key={agent.id} type="button" className={`station agent-row ${agent.coordinator ? 'coordinator' : ''} ${agent.cliActive ? 'live' : ''}`} onClick={() => { selectAgent(agent.id); gameApi.host?.focusAgent(agent.id); }}>
         <Avatar variant={agent.variant} />
         <span><strong>{agent.coordinator ? '◆ ' : ''}{agent.name}</strong><span className="sub">{agent.coordinator ? agent.sessionProvider ? `${agent.sessionProvider === 'codex' ? 'Codex' : 'Claude Code'} · ${agent.cliActive ? 'çalışıyor' : 'oturum bağlı'}` : 'Koordinatör · sohbete hazır' : agent.cliActive ? 'İstasyon etkin' : agent.stationWorker ? 'İş istasyonu · hazır' : 'Skill · görev bekliyor'}</span></span>
         <span className={`dot ${agent.cliActive ? 'active' : 'idle'}`} />

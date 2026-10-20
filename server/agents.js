@@ -78,9 +78,10 @@ export function buildAgents({ data, live = {}, activity = {}, runs = [], runStat
           task = station?.name ?? null;
         }
         if (liveHere) {
-          waiting = session.state === 'waiting';
-          status = waiting ? 'thinking' : session.tool || session.stationId ? 'working' : 'thinking';
-          task = session.tool ? `${session.tool}${session.file ? `: ${session.file}` : ''}` : task ?? (waiting ? 'Cevap / izin bekliyor' : 'Düşünüyor');
+          const endedTurn = session.state === 'waiting' && ['turn', 'opened'].includes(session.reason);
+          waiting = session.state === 'waiting' && !endedTurn;
+          status = endedTurn ? 'idle' : waiting ? 'thinking' : session.tool || session.stationId ? 'working' : 'thinking';
+          task = endedTurn ? null : session.tool ? `${session.tool}${session.file ? `: ${session.file}` : ''}` : task ?? (waiting ? 'Cevap / izin bekliyor' : 'Düşünüyor');
         }
         if (runHere) {
           status = waiting ? 'thinking' : 'working';
@@ -112,7 +113,7 @@ export function buildAgents({ data, live = {}, activity = {}, runs = [], runStat
           waiting,
           currentTask: task,
           model: liveHere ? session.model ?? null : null,
-          cliActive: !!runHere || !!(liveHere && !waiting),
+          cliActive: !!runHere || !!(liveHere && session.state === 'working'),
           observation: liveHere ? { provider: session.provider ?? 'claude', tool: session.tool, file: session.file, ageSec: session.ageSec, state: session.state } : null,
           deskId: station?.id ?? null,
           deskName: station?.name ?? null,

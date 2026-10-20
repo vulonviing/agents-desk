@@ -58,14 +58,17 @@ test('the history continues the same CLI session, and a failure is recorded and 
   t.after(clean);
   const r = room(tmp());
   const def = findAgent(r, 'cv#skill:math');
-  const chats = createChats();
+  const lifecycle = [];
+  const chats = createChats({onChange:event=>lifecycle.push(event)});
   await chats.send(r, def, 'cv#skill:math', 'bir');
   const msgs = await chats.send(r, def, 'cv#skill:math', 'iki');
   assert.deepEqual(msgs.map((m) => [m.role, m.text]), [['user', 'bir'], ['assistant', 'yanıt: bir'], ['user', 'iki'], ['assistant', 'yanıt: iki']]);
   assert.equal(calls(log)[1].args[calls(log)[1].args.indexOf('--resume') + 1], 'chat-session-1');
+  assert.equal(lifecycle.filter(e=>e.phase==='completed').at(-1).ok,true);
   process.env.DESK_FAKE_FAIL = '1';
   await assert.rejects(chats.send(r, def, 'cv#skill:math', 'üç'), (e) => e.status === 502 && /Hata/.test(e.message));
   assert.equal(chats.history('cv#skill:math').messages.at(-1).role, 'error');
+  assert.equal(lifecycle.filter(e=>e.phase==='completed').at(-1).ok,false);
   chats.reset('cv#skill:math');
   assert.deepEqual(chats.history('cv#skill:math').messages, []);
 });

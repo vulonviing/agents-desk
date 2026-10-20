@@ -1,6 +1,6 @@
-import { existsSync, lstatSync, watch } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, watch } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
 // Native filesystem notifications; no periodic directory scan. Coalesce editor/log bursts.
 export function createActivityWatch(onChange, debounceMs = 100) {
@@ -48,12 +48,27 @@ export function createActivityWatch(onChange, debounceMs = 100) {
     for (const [key, spec] of wanted) {
       if (watchers.has(key)) continue;
       try {
+        const stamps = new Map();
+        // FSEvents may replay a file creation that happened just before watch(). Seed metadata
+        // so that startup noise is not mistaken for a second, later transcript update.
+        if (spec.kind === 'session') for (const entry of readdirSync(spec.path, { withFileTypes: true }).slice(0, 1000)) {
+          if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+          try { const st = lstatSync(join(spec.path, entry.name)); stamps.set(entry.name, `${st.mtimeMs}:${st.size}`); } catch { /* disappearing file */ }
+        }
         const handle = watch(spec.path, { recursive: spec.recursive, persistent: false }, (_type, filename) => {
           const name = String(filename ?? '').replaceAll('\\', '/');
           if (spec.kind === 'discover' && name && name.split('/')[0] !== spec.child) return;
           if (spec.kind === 'session' && name && !name.endsWith('.jsonl') && name.includes('.')) return;
           if (spec.kind === 'project' && name !== '.agents' && name !== '.claude') return;
           if (spec.kind === 'skills' && name && !/(^|\/)(skills|SKILL\.md|AGENTS\.md)(\/|$)/.test(name)) return;
+          if (spec.kind === 'session' && name === basename(spec.path) && !existsSync(join(spec.path, name))) return;
+          if (spec.kind === 'session' && name.endsWith('.jsonl')) {
+            let stamp = 'missing';
+            try { const st = lstatSync(join(spec.path, name)); stamp = `${st.mtimeMs}:${st.size}`; } catch { /* deletion */ }
+            if (stamps.get(name) === stamp) return;
+            stamps.set(name, stamp);
+            while (stamps.size > 256) stamps.delete(stamps.keys().next().value);
+          }
           queue(spec.kind === 'skills' || spec.kind === 'project' || spec.kind === 'discover' && spec.skills);
         });
         handle.on('error', () => { handle.close(); watchers.delete(key); });

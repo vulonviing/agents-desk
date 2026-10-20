@@ -30,7 +30,7 @@ export function AgentPanel({ agentId }: { agentId: string }) {
       <button type="button" onClick={() => gameApi.host?.focusAgent(dto.id)}>Simine git</button>
       {chatAgentId !== dto.id && <button type="button" className="primary" onClick={() => openChat(dto.id)}>Sohbeti aç</button>}
     </div>
-    {flow.length > 0 && <section><h3>İş akışı</h3>{flow.map(e => <p key={e.id} className="cli-observation">{e.kind === 'handoff' ? `${e.file}: ${stationName(e.from)} → ${stationName(e.to)}` : `${stationName(e.to)} · ${e.tool}`}<br /><small>{timeAgo(e.at)}</small></p>)}</section>}
+    {flow.length > 0 && <section><h3>İş akışı</h3>{flow.map(e => <p key={e.id} className="cli-observation">{e.kind === 'completed' ? '✔ Tur tamamlandı' : e.kind === 'error' ? '⛔ Tur kesildi' : e.kind === 'handoff' ? `${e.file}: ${stationName(e.from)} → ${stationName(e.to)}` : `${stationName(e.to)} · ${e.tool}`}<br /><small>{timeAgo(e.at)}</small></p>)}</section>}
     <details className="agent-technical"><summary>Oturum ve teknik bilgiler</summary><dl className="facts">
       {dto.sessionId && <><dt>Oturum</dt><dd className="mono">{dto.sessionId.slice(-8)}</dd></>}
       {dto.model && <><dt>Model</dt><dd>{dto.model}</dd></>}

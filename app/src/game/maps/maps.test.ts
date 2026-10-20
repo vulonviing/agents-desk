@@ -158,9 +158,9 @@ describe('room map', () => {
       if (y >= 2) expect(col[y * map.width + x] === 0).toBe(layout.grid[y]![x]);
     }
   });
-  it('has a station object per station and the four social spots', () => {
+  it('has a station object per station and the social spots and service printer', () => {
     expect(objects(map, 'stations')).toHaveLength(17);
-    expect(objects(map, 'spots').map((o) => propsOf(o).kind).sort()).toEqual(['coffee', 'cooler', 'sofa', 'window']);
+    expect(objects(map, 'spots').map((o) => propsOf(o).kind).sort()).toEqual(['coffee', 'cooler', 'printer', 'sofa', 'window']);
     const st = propsOf(objects(map, 'stations')[0]!);
     expect([st.seatTx, st.seatTy]).toEqual([layout.stations[0]!.seat.x, layout.stations[0]!.seat.y]);
   });
@@ -234,5 +234,27 @@ it('renders purpose-specific office art using available atlas frames and theme t
     checkTiled(map);
     for (const o of objects(map, 'furniture')) expect(atlas.frames).toHaveProperty(String(propsOf(o).frame));
     if (id !== 'emrecan-cv') expect(tiles(map, 'walls').some(g => g >= 409)).toBe(true);
+  }
+});
+
+it('compact offices share the north wall with their first rooms, without an extra upper corridor', () => {
+  const l=layoutRoom(room('emrecan-cv',17));
+  const north=l.departments.filter(z=>z.y===0);
+  expect(north.length).toBeGreaterThan(0);
+  expect(l.hallY).toBe(Math.max(...north.map(z=>z.h)));
+  for(const s of l.stations)expect(l.grid[s.access.y]?.[s.access.x]).toBe(true);
+});
+
+it('floor walkers can reach other offices through the actual door/collision grid', async () => {
+  const {floorWalkLayout}=await import('../systems/floorLife');
+  const {findPath}=await import('../systems/pathfinding');
+  const f=floor(4),m=buildFloorMap(layoutFloor(f),f).map;
+  const homes=objects(m,'desks').map(o=>{const p=propsOf(o);return {id:String(p.roomId),seat:{x:Number(p.tx)+2,y:Number(p.ty)},access:{x:Number(p.tx)+2,y:Number(p.ty)-1}};});
+  const nav=floorWalkLayout(m,homes);
+  expect(nav.spots.length).toBeGreaterThanOrEqual(3);
+  for(const start of nav.stations)for(const end of nav.stations){
+    const path=findPath(nav.grid,start.access,end.access);
+    expect(path).not.toBeNull();
+    for(const p of path??[])expect(nav.grid[p.y]?.[p.x]).toBe(true);
   }
 });

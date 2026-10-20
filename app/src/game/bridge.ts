@@ -6,6 +6,8 @@ import type { AgentDTO, LiveSession, ManagerDTO, OfficeSnapshot, Projects } from
 export type View = { kind: 'master'; floorId: null } | { kind: 'floor'; floorId: string } | { kind: 'room'; floorId: string; roomId: string };
 
 export interface HostState {
+  effectsEnabled?: boolean;
+  connection?: 'connecting' | 'live' | 'reconnecting' | 'offline';
   observations?: OfficeSnapshot['observations'];
   projects: Projects | null;
   floorAspect: number;
@@ -21,7 +23,16 @@ export interface HostState {
   selectedStationId: string | null;
 }
 
+export interface AmbientConversation {
+  id: string;
+  participants: {id:string;name:string}[];
+  turns: {speakerId:string;text:string}[];
+  active: boolean;
+  source?: import('../services/dialogues').DialogueSource;
+}
+
 export interface GameBridge {
+  onConversation?(data: AmbientConversation | null, open?: boolean): void;
   onReady(): void;
   onAgentClick(id: string): void;
   onAgentHover(id: string | null, screen: { x: number; y: number } | null): void;

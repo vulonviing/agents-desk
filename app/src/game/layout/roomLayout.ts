@@ -23,7 +23,7 @@ export interface PlacedStation {
   seat: { x: number; y: number };
   access: { x: number; y: number };
 }
-export type SpotKind = 'coffee' | 'cooler' | 'window' | 'sofa';
+export type SpotKind = 'coffee' | 'cooler' | 'window' | 'sofa' | 'printer';
 export interface Spot {
   id: string;
   kind: SpotKind;
@@ -31,7 +31,7 @@ export interface Spot {
   y: number;
 }
 export interface RoomProp {
-  type: 'window' | 'coffee' | 'cooler' | 'sofa' | 'plant' | 'table' | 'whiteboard';
+  type: 'window' | 'coffee' | 'cooler' | 'sofa' | 'plant' | 'table' | 'whiteboard' | 'printer';
   tx: number;
   ty: number;
   w: number;
@@ -66,7 +66,7 @@ const COORD_H = 12;
 
 export function layoutRoom(room: Pick<Room, 'id' | 'stations'>): RoomLayout {
   const design = officeDesign(room);
-  if (room.stations.length <= 6) return compactRoom(room);
+  if (room.stations.length <= 6) return withPrinter(compactRoom(room));
   const coordination = { id: 'coordination', name: 'Koordinatör odası', purpose: 'Ofis koordinasyonu ve CLI oturumları.', dress: 'coordination', step: 'K', stations: [] as Station[], color: '#c6b3e3', floor: design.theme === 'music' ? 'carpetD' : 'herringbone' };
   // the coordinator room leads the north band (next to the door); the departments follow, split over two bands
   const groups = [coordination, ...design.departments];
@@ -78,9 +78,9 @@ export function layoutRoom(room: Pick<Room, 'id' | 'stations'>): RoomLayout {
     const rows = Math.max(1, Math.ceil(g.stations.length / cols));
     return { cols, rows, w: cols * PITCH + 2, h: rows * PITCH + 4 };
   };
-  const bandH = bands.map((b) => Math.max(0, ...b.map((g) => dims(g).h)));
+  const bandH = bands.map((b, i) => Math.max(0, ...b.map((g) => dims(g).h)) + (i === 0 ? 1 : 0));
   const bandW = bands.map((b) => 1 + b.reduce((n, g) => n + dims(g).w, 0));
-  const corridorY = NORTH + bandH[0]!;
+  const corridorY = bandH[0]!;
   const southY = corridorY + 5;
   const tilesW = Math.max(26, ...bandW) + 1;
   const tilesH = southY + (bands[1]!.length ? bandH[1]! : 0) + 4;
@@ -90,7 +90,8 @@ export function layoutRoom(room: Pick<Room, 'id' | 'stations'>): RoomLayout {
   const props: RoomProp[] = [];
   bands.forEach((band, bi) => {
     const south = bi === 1;
-    const y = south ? southY : NORTH;
+    const y = south ? southY : 0;
+    const deskOffset = south ? 3 : 4;
     let x = 1;
     for (const g of band) {
       const d = dims(g);
@@ -98,12 +99,12 @@ export function layoutRoom(room: Pick<Room, 'id' | 'stations'>): RoomLayout {
       const zone: DepartmentZone = { ...g, coordinator: g.id === 'coordination', x, y, w: d.w, h, doorX: x + d.w - 4, doorY: south ? y : y + h - 1 };
       departments.push(zone);
       if (zone.coordinator) {
-        coordinatorDesks.push({ tx: x + 1, ty: y + 3, access: { x: x + 2, y: y + 2 } });
-        props.push({ type: 'table', tx: x + 7, ty: y + 3, w: 3, h: 3 }, { type: 'whiteboard', tx: x + 6, ty: y, w: 2, h: 2 }, { type: 'sofa', tx: x + 2, ty: y + h - 3, w: 3, h: 1 });
+        coordinatorDesks.push({ tx: x + 1, ty: y + deskOffset, access: { x: x + 2, y: y + deskOffset - 1 } });
+        props.push({ type: 'table', tx: x + 7, ty: y + deskOffset, w: 3, h: 3 }, { type: 'whiteboard', tx: x + 6, ty: y, w: 2, h: 2 }, { type: 'sofa', tx: x + 2, ty: y + h - 3, w: 3, h: 1 });
       }
       g.stations.forEach((station, n) => {
         const tx = x + 1 + (n % d.cols) * PITCH;
-        const ty = y + 3 + Math.floor(n / d.cols) * PITCH;
+        const ty = y + deskOffset + Math.floor(n / d.cols) * PITCH;
         stations.push({ station, tx, ty, seat: { x: tx + 1, y: ty }, access: { x: tx + 1, y: ty - 1 } });
       });
       props.push({ type: 'plant', tx: x + 1, ty: y + h - 2, w: 1, h: 1 });
@@ -142,7 +143,7 @@ export function layoutRoom(room: Pick<Room, 'id' | 'stations'>): RoomLayout {
   for (const s of coordinatorDesks) block(s.tx, s.ty, DESK_W, DESK_H);
   for (const p of props) if (p.type === 'cooler' || p.type === 'sofa' || p.type === 'plant' || p.type === 'table') block(p.tx, p.ty, p.w, p.h);
   const rows = bands.reduce((n, b, i) => n + (b.length ? Math.max(...b.map((g) => dims(g).rows)) : 0) * (i ? 1 : 1), 0);
-  return { tilesW, tilesH, cols: 4, rows, xs, stations, props, spots, grid, door: { x: 4, w: 2 }, departments, partitions, theme: design.theme, openPlan: false, hallY: corridorY, coordinatorDesks };
+  return withPrinter({ tilesW, tilesH, cols: 4, rows, xs, stations, props, spots, grid, door: { x: 4, w: 2 }, departments, partitions, theme: design.theme, openPlan: false, hallY: corridorY, coordinatorDesks });
 }
 
 // Small projects share one room: a block of desks, the coordinator desk beside it and the social corner.
@@ -163,4 +164,14 @@ function compactRoom(room: Pick<Room, 'id' | 'stations'>): RoomLayout {
   for(const p of props)if(p.type!=='coffee')for(let y=p.ty;y<p.ty+p.h;y++)for(let x=p.tx;x<p.tx+p.w;x++)grid[y]![x]=false;
   const departments: DepartmentZone[] = [{id:'shared',name:['checker','interview','portfolio'].includes(design.theme)?design.departments[0]!.name:'Ortak çalışma odası',purpose:'Koordinasyon ve uzmanlar aynı çalışma alanında.',dress:design.departments[0]!.dress,step:'',stations:room.stations,color:design.accent,floor:design.departments[0]!.floor,x:1,y:0,w:tilesW-2,h:tilesH-1,doorX:2,doorY:tilesH-1}];
   return {tilesW,tilesH,cols:3,rows,xs:18,stations,props,spots,grid,departments,partitions:Array.from({length:tilesH},()=>Array(tilesW).fill(false)),door:{x:16,w:2},theme:design.theme,openPlan:true,hallY:tilesH-4,coordinatorDesks};
+}
+
+// Service objects stay at the edge of circulation; the centre lane remains free.
+function withPrinter(layout: RoomLayout): RoomLayout {
+  const x = layout.openPlan ? 17 : layout.tilesW - 3;
+  const y = layout.openPlan ? layout.tilesH - 2 : layout.hallY;
+  layout.props.push({ type: 'printer', tx: x, ty: y, w: 1, h: 1 });
+  layout.grid[y]![x] = false;
+  layout.spots.push({ id: 'printer', kind: 'printer', x, y: layout.openPlan ? y - 1 : y + 1 });
+  return layout;
 }

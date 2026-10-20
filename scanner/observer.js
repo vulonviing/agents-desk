@@ -84,6 +84,10 @@ export function createObserver() {
       if (!recent) return;
       entry.last = { at: ts, roomId: room.id, stationId: entry.stationId, provider: entry.provider, model: entry.model ?? null, tool, file, state: 'working', reason: tool ? 'tool' : 'thinking' };
     };
+    const finishTurn = (failed = false) => {
+      touch(); entry.last.state = 'waiting'; entry.last.reason = 'turn';
+      if (!warmup) publish({ sessionId: entry.id, kind: failed ? 'error' : 'completed', at: new Date(ts).toISOString(), roomId: room.id, provider: entry.provider, from: null, to: entry.stationId ?? '', file: null, tool: 'turn' });
+    };
     const complete = (id, success) => {
       const call = entry.pending.get(id);
       entry.pending.delete(id);
@@ -120,7 +124,7 @@ export function createObserver() {
       if (record.type === 'assistant') {
         if (typeof record.message?.model === 'string' && /^[\w.:-]{1,60}$/.test(record.message.model)) entry.model = record.message.model;
         for (const b of Array.isArray(record.message?.content) ? record.message.content : []) if (b?.type === 'tool_use') call(b.name, b.input ?? {}, b.id);
-        if (record.message?.stop_reason === 'end_turn' && recent) { touch(); entry.last.state = 'waiting'; entry.last.reason = 'turn'; }
+        if (record.message?.stop_reason === 'end_turn' && recent) finishTurn();
       }
       if (record.type === 'user') {
         if (typeof record.message?.content === 'string' || (record.message?.content ?? []).some(b => b?.type === 'text')) entry.stationId = null;
@@ -130,7 +134,7 @@ export function createObserver() {
     } else {
       if (record.type === 'event_msg' && p.type === 'task_started') entry.stationId = null;
       if (record.type === 'turn_context' || record.type === 'event_msg' && p.type === 'task_started') touch();
-      if (record.type === 'event_msg' && /^(task_complete|task_aborted)$/.test(p.type) && recent) { touch(); entry.last.state = 'waiting'; entry.last.reason = 'turn'; }
+      if (record.type === 'event_msg' && /^(task_complete|task_aborted)$/.test(p.type) && recent) finishTurn(p.type === 'task_aborted');
       if (record.type === 'response_item' && /^(function_call|custom_tool_call)$/.test(p.type)) {
         let input = {};
         // Structured native tool arguments only. Code-mode exec input is deliberately ignored.

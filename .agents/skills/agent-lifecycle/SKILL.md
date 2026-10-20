@@ -15,7 +15,7 @@ Ambient life (breaks, walks, small talk) is allowed but is need-driven (`smart-o
 - Session sims enter through the office door, work at a desk and leave when the retention window expires (`sessions.liveMinutes`); a closed terminal cannot be detected, so do not animate a "terminal closed" exit.
 
 ## Lifecycle of a session visitor
-`arrive → walk to desk → sit → work loop → finish → printer → leave` (arrival/exit animation is new; until it exists, sims spawn at the desk)
+`arrive → walk to desk → sit → work loop → finish → printer → leave` (observed session visitors now walk in/out through the office door; permanent residents retain their desks)
 
 Events come from `live-signals` (watcher/observer; hooks only if installed):
 
@@ -42,6 +42,14 @@ Resident rules: `offline` = asleep at desk (zzz, dust level by `dust`); a commit
 
 - Ambient lines (coffee, water, window, news, visits, desk murmurs) are picked from the office dialogue pool (`office-dialogues`); they are never "observed" speech and never claim work.
 
+## Current implementation notes
+- `scanner/observer.js` emits metadata-only `completed` for Claude `end_turn` / Codex `task_complete`, and `error` for Codex `task_aborted`. Cold history and mere inactivity do not emit completion.
+- Successful/failed Desk chat and legacy run endings also publish metadata-only lifecycle observations; failed replies never become success receipts.
+- Session visitors enter at the door, follow walkable paths, and leave on retention expiry. A known permanent coordinator remains after a session expires.
+- Completed observers can visit the service printer; new work/waiting cancels the visit. The receipt represents observed turn completion, never proof that the CLI printed a document.
+- Waiting on user input after a completed turn is ordinary idle; stale pending tools remain inferred waiting. Do not label inference as confirmed permission denial.
+- Read/Grep/Glob use a reading indicator; waiting is visible and does not wander. Green diamonds still depend solely on `cliActive`.
+
 ## Design rules
 1. **State comes from the server, movement from the game.** `AgentDTO.status` is truth (`server/agents.js`); `moving` is set client-side while walking. UI shows `moving` only while a path is active.
 2. **One state machine** (`app/src/game/systems/behavior.ts`: seated / walking / doing / sleeping + new `arriving` / `leaving`). Transitions are a table, not scattered `if`s; each transition has a test.
@@ -57,3 +65,6 @@ Resident rules: `offline` = asleep at desk (zzz, dust level by `dust`); a commit
 
 ## Read when needed
 - Where events come from / hooks → `live-signals`. Objects they walk to → `smart-objects`. Pixel poses/frames → `pixel-asset-pipeline`.
+
+## Floor and department social travel
+Use the same collision-aware needs controller in floor and office views. Floor residents can visit another office, department residents another room, and nearby available sims can start a held four-turn conversation. Real activity interrupts ambient speech and travel immediately. Never represent ambient cross-office walks as observed assignments; view switches rebuild ambient positions.

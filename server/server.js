@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,12 +10,15 @@ import { scanActivity } from '../scanner/activity.js';
 import { createObserver } from '../scanner/observer.js';
 import { createActivityWatch } from '../scanner/watch.js';
 import { validatePlan } from './plans.js';
-import { runChoice, runRouter } from './claude.js';
+import { runRouter } from './claude.js';
 import { createRunner } from './runner.js';
 import { listSessions, readConversation } from './transcripts.js';
 import { buildAgents, summarize } from './agents.js';
 import { createChats, findAgent } from './chat.js';
+import { createDialogueCreator } from './dialogue-creator.js';
 import { createDialogues } from './dialogues.js';
+import { getBriefing } from './briefing-client.js';
+import { createAntigravityRunner } from './antigravity.js';
 import { CHOICE_SCHEMA, choicePrompt, findManager, managerChatPrompt, managerDefs, optionsFor, pickTarget } from './managers.js';
 import { runDecision, providerOf } from './llm.js';
 import { routerPrompt, PLAN_SCHEMA } from './plans.js';
@@ -108,6 +111,7 @@ export function createDeskServer(deps = {}) {
   const localObservations = [];
   const runStations = {};
   let dispatching = false;
+  let lastSnapshot = null;
   const snapshot = () => {
     const data = readProjects();
     const observed = observer.poll(data, config());
@@ -119,7 +123,7 @@ export function createDeskServer(deps = {}) {
     const agents = coordinators.build(data, residents, observed.sessions ?? [], id => chats.state(id));
     const managers = managerDefs(data).map((m, i) => ({ ...m, variant: VARIANTS[(i * 5 + 3) % VARIANTS.length], status: dispatching ? 'thinking' : 'idle', offices: data.floors.reduce((n, f) => n + f.rooms.length, 0) }));
     armExpiry(observed, live, activity, runSnap);
-    return { at: new Date().toISOString(), sessions: observed.sessions ?? [], summary: summarize(agents), agents, managers, live, activity, observations: [...observed.events, ...localObservations.filter(e => Date.now() - Date.parse(e.at) < 120_000)] };
+    return lastSnapshot = { at: new Date().toISOString(), sessions: observed.sessions ?? [], summary: summarize(agents), agents, managers, live, activity, observations: [...observed.events, ...localObservations.filter(e => Date.now() - Date.parse(e.at) < 120_000)] };
   };
   let lastOffice = '';
   let refreshTimer = null, expiryTimer = null;
@@ -193,6 +197,8 @@ export function createDeskServer(deps = {}) {
       if (type === 'run' && ['done', 'failed', 'cancelled'].includes(payload.state)) {
         const p = plans.get(payload.planId);
         if (p) p.status = payload.state;
+        localObservations.push({ id: randomUUID(), kind: payload.state === 'done' ? 'completed' : 'error', at: new Date().toISOString(), roomId: payload.roomId, provider: 'claude', from: null, to: runStations[payload.roomId] ?? '', file: null, tool: 'run', coordinatorId: `${payload.roomId}#project` });
+        if (localObservations.length > 80) localObservations.shift();
         delete runStations[payload.roomId];
       }
       if (type === 'run-station' && payload.stationId) runStations[payload.roomId] = payload.stationId;
@@ -203,21 +209,43 @@ export function createDeskServer(deps = {}) {
     dataDir,
   });
 
-  // Ambient dialogue pools (Haiku refills them rarely; see server/dialogues.js and the office-dialogues skill)
-  const dialogues = createDialogues({ dataDir, config, run: (system, input, schema, o) => runChoice(system, input, schema, { cwd: ROOT, model: o?.model, timeoutMs: 90_000 }).catch((e) => { throw e; }) });
+  // Ambient dialogue pools (Antigravity Flash refills them rarely; see server/dialogues.js and the office-dialogues skill)
+  const dialogues = createDialogues({ dataDir, config, creator: createDialogueCreator({dataDir}), run: createAntigravityRunner({ dataDir }), onChange: scope => emit('dialogues', {scope}), briefing: async office => {
+    let location = {}; try { location = JSON.parse(readFileSync(join(dataDir, 'weather-location.json'), 'utf8')); } catch { /* no location permission */ }
+    return (deps.briefing ?? getBriefing)(dataDir, { topic: office.topic, queries: office.searchQueries ?? [], ...location });
+  } });
   const officeContext = (id) => {
     const data = readProjects();
     const floor = data.floors.find((f) => f.rooms.some((r) => r.id === id));
     const room = floor?.rooms.find((r) => r.id === id);
     if (!room) return null;
-    const snap = snapshot();
-    const agents = snap.agents.filter((a) => a.roomId === id).slice(0, 10).map((a) => ({ name: a.name, mission: room.stations.find((s) => s.id === a.deskId)?.description || room.readmeSummary || a.role || '' }));
+    const snap = lastSnapshot ?? { agents: room.stations.map(s => ({ roomId: id, deskId: s.id, name: s.skill ?? s.name, role: s.description })), activity: null };
+    const agents = snap.agents.filter((a) => a.roomId === id).slice(0, 24).map((a) => ({ name: a.name, mission: room.stations.find((s) => s.id === a.deskId)?.description || room.readmeSummary || a.role || '' }));
     const acts = Object.entries(snap.activity?.rooms?.[id] ?? {}).filter(([, v]) => v?.lastAt).sort((x, y) => y[1].lastAt.localeCompare(x[1].lastAt)).map(([sid]) => room.stations.find((s) => s.id === sid)?.name ?? sid);
-    return { name: room.name, floor: floor.name, agents, recent: acts };
+    const curator = agents.find(a => /research|collector|source|radar|araştır|ilan|filter/i.test(a.name + ' ' + a.mission)) ?? agents[0];
+    const topic = floor.id === 'research' ? 'science' : floor.id === 'growth' && room.id !== 'portfolio' ? 'business' : room.id === 'mahur' ? 'culture' : 'technology';
+    const concepts = floor.id === 'research' ? 'yöntem tartışması, kanıt tartısı, merak duvarı' : floor.id === 'growth' ? 'başvuru kulisi, mülakat provası, anlatım kliniği, tasarım gözü' : 'prototip kulisi, kullanıcı gözü, tasarım kliniği';
+    return { name: room.name, floor: floor.name, agents, recent: acts, topic, curator: curator?.name, concept: concepts };
+
+  };
+  const floorContext = id => {
+    const floor = readProjects().floors.find(f => f.id === id);
+    if (!floor) return null;
+    const agents = floor.rooms.flatMap(room => {
+      const roles = (lastSnapshot?.agents ?? []).filter(a => a.roomId === room.id);
+      const curator = roles.find(a => /research|collector|source|radar|araştır|ilan|filter/i.test(a.name)) ?? roles[0];
+      const specialist = roles.find(a => a.id !== curator?.id && !a.coordinator);
+      return [curator,specialist].filter(Boolean).map(a => ({name:a.name,mission:`${room.name}: ${room.stations.find(s=>s.id===a.deskId)?.description || a.role || ''}`.slice(0,150)}));
+    });
+    return {name:`${floor.name} katı`,floor:floor.name,agents:agents.slice(0,24),recent:[],topic:id==='research'?'science':id==='growth'?'business':'technology',curator:'Ofislerin gündem küratörleri',concept:`${floor.name}: farklı ofislerden meslektaşların karşılaşması, disiplinler arası merak, gündem tartışması, ortak alan hikâyeleri. Ofis farklarını konuştur. En az %70 genel satır olsun.`};
   };
   const chats = createChats({ onChange: event => {
     if (event.phase === 'delegation') {
       localObservations.push({ id: randomUUID(), kind: 'activation', at: new Date().toISOString(), roomId: event.roomId, provider: event.provider, from: null, to: event.stationId, tool: 'Skill görevi', file: null, coordinatorId: event.id.slice(event.provider.length + 1) });
+      if (localObservations.length > 80) localObservations.shift();
+    }
+    if (event.phase === 'completed' && event.ok !== undefined && !event.roomId.startsWith('manager:')) {
+      localObservations.push({ id: randomUUID(), kind: event.ok ? 'completed' : 'error', at: new Date().toISOString(), roomId: event.roomId, provider: event.provider, from: null, to: '', file: null, tool: 'chat', coordinatorId: event.id.slice(event.provider.length + 1) });
       if (localObservations.length > 80) localObservations.shift();
     }
     observer.invalidate(); soon();
@@ -251,11 +279,24 @@ export function createDeskServer(deps = {}) {
       if (path === '/api/activity') return send(res, 200, readActivity());
       if (path === '/api/sessions') return send(res, 200, scanSessions(readProjects(), config()));
       if (path === '/api/office') return send(res, 200, snapshot());
+      if (path === '/api/dialogues/location') {
+        let configured = false; try { const location = JSON.parse(readFileSync(join(dataDir, 'weather-location.json'), 'utf8')); configured = Number.isFinite(location.latitude); } catch { /* unset */ }
+        return send(res, 200, { configured });
+      }
+      if (path === '/api/briefing') {
+        const ctx = officeContext(url.searchParams.get('office') ?? '');
+        if (!ctx) return fail(res, 404, 'Ofis bulunamadı.');
+        let location = {}; try { location = JSON.parse(readFileSync(join(dataDir, 'weather-location.json'), 'utf8')); } catch { /* unset */ }
+        const briefing = await (deps.briefing ?? getBriefing)(dataDir, { topic: ctx.topic, ...location }).catch(() => ({ sources: [] }));
+        return send(res, 200, { ...briefing, curator: ctx.curator, concept: ctx.concept });
+      }
       if (path === '/api/dialogues/status') return send(res, 200, dialogues.status());
       if (path === '/api/dialogues') {
-        const id = url.searchParams.get('office') ?? '';
-        if (!/^[\w.-]{1,80}$/.test(id)) return fail(res, 400, 'Ofis kimliği geçersiz.');
-        const ctx = officeContext(id);
+        const floorId = url.searchParams.get('floor');
+        const scopeId = floorId ?? url.searchParams.get('office') ?? '';
+        if (!/^[\w.-]{1,80}$/.test(scopeId)) return fail(res, 400, 'Yer kimliği geçersiz.');
+        const id = floorId ? `floor:${floorId}` : scopeId;
+        const ctx = floorId ? floorContext(floorId) : officeContext(id);
         if (!ctx) return fail(res, 404, 'Ofis bulunamadı.');
         return send(res, 200, dialogues.get(id, ctx));
       }
@@ -298,6 +339,21 @@ export function createDeskServer(deps = {}) {
       return send(res, 200, await runner.requestPermission(body));
     }
     if (!originOk(req)) return fail(res, 403, 'forbidden origin');
+
+    if (path === '/api/dialogues/location') {
+      const body = await readJson(req);
+      const file = join(dataDir, 'weather-location.json');
+      if (body.clear === true) {
+        try { unlinkSync(file); } catch { /* already unset */ }
+        dialogues.invalidate();
+        return send(res, 200, { configured: false });
+      }
+      if (!Number.isFinite(body.latitude) || !Number.isFinite(body.longitude) || Math.abs(body.latitude) > 90 || Math.abs(body.longitude) > 180) return fail(res, 400, 'Konum geçersiz.');
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(file, JSON.stringify({ latitude: Math.round(body.latitude * 10) / 10, longitude: Math.round(body.longitude * 10) / 10 }), { mode: 0o600 });
+      dialogues.invalidate();
+      return send(res, 200, { configured: true });
+    }
 
     if (path === '/api/rescan') { const data = rescan(); activityWatch.configure(data, config()); observer.invalidate(); emit('projects', data); soon(); return send(res, 200, data); }
 

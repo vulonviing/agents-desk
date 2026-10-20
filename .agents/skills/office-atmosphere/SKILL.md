@@ -11,6 +11,11 @@ Goal: the office feels alive without lying and without noise. Atmosphere never c
 - **Windows follow the real clock** (`window_day`, `window_dusk`, `window_night`, generated in `gen-decor.mjs`): 07–17 day, 17–20 and 06 dusk, otherwise night. `OfficeScene.updateSky()` swaps the frame of every `lz_window*` sprite (checked once per frame, changes only at phase boundaries).
 - Ambient talk: see `office-dialogues` (pool + small model, never per-line generation).
 
+## Observation-driven effects now implemented
+- `systems/atmosphere.ts`: clock phase, eight-second completion receipt, sixty-second aborted-turn indicator, short celebration after three observed completions/hour with five-minute cooldown. A successful turn ending is not proof of a physical print or file delivery.
+- Scene: clock hands, occupied coffee steam, warm active-desk light after dusk, printer indicator/paper, connection-loss notice. “Ofis yaşamı → Atmosfer” disables effects; reduced motion suppresses steam/celebration. Hidden tabs pause visual work.
+- Public current weather and dated news are dialogue context through `office-dialogues`; no synthetic current headlines, weather or social-media activity.
+
 ## Allowed
 - **Day/night** from the real clock: window sprites switch sky frame (day / dusk / night); optional warm light overlay on desks at night. No whole-room darkening.
 - **Ambient props**: wall clock showing real time (analog frame set), plants swaying (2 frames), blinking server LEDs, steam from coffee, dust motes in dormant offices.

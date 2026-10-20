@@ -28,6 +28,11 @@ Every smart object defines:
 `needCurve` is steep near 100 (very tired → coffee wins clearly) and flat near 0. `CALM_CHOICES` (crowded offices) lowers movement frequency.
 Replace fixed weight tables (`IDLE_CHOICES`) with this scoring; keep the tables only as test fixtures.
 
+## Implemented needs and reservations
+- `Worker.needs` tracks energy/social/focus on an injected clock; choose among the top three need/distance scores. Do not immediately repeat the previous activity.
+- Scene provides all workers and busy ids. Visits require an idle, seated, present listener. Coffee/cooler/window/sofa/printer reserve their standing destination before walking; capacity is one with up to three distinct queue tiles. Missing/unreachable queue space means choose again later.
+- Work and inferred waiting interrupt queues and release reservations. Queue bodies do not claim they are already drinking/printing. Passing characters are not yet a general pedestrian collision simulation; only interaction destinations/queue positions are reserved.
+
 ## Objects that carry information (the claude-office lesson)
 | Object | Shows | Source |
 |---|---|---|
@@ -54,3 +59,6 @@ An info binding must be **truthful**: no animation without the underlying event,
 
 ## Read when needed
 - Where objects sit → `office-layout-design`. Sprite/animation frames → `pixel-asset-pipeline`. Character states → `agent-lifecycle`.
+
+## Floor services
+Floor kitchen, garden and meeting areas publish reachable social spots. Preview desks and upright furniture block navigation; floor art remains walkable. Use shared queue reservations and valid approach tiles rather than a parametric corridor animation.

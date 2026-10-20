@@ -1,4 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+import { getJson, postJson } from '../../services/api';
+import { resetDialogues } from '../../services/dialogues';
 import { getAdapter } from '../../services/bootstrap';
 import { EMPTY_SUMMARY, useOffice } from '../../stores/officeStore';
 import { useManagers } from '../../stores/managersStore';
@@ -12,7 +14,17 @@ const CONNECTION: Record<string, { text: string; cls: string }> = {
 };
 
 export function OfficeHUD() {
-  const { inMaster, floorsOpen, goMaster, toggleFloors } = useOffice();
+  const [location, setLocation] = useState<'unset' | 'loading' | 'ready' | 'error'>('unset');
+  useEffect(() => { void getJson<{configured:boolean}>('/api/dialogues/location').then(r=>setLocation(r.configured ? 'ready' : 'unset')).catch(()=>{}); }, []);
+  const useLocation = () => {
+    if (!navigator.geolocation) { setLocation('error'); return; }
+    setLocation('loading');
+    navigator.geolocation.getCurrentPosition(position => {
+      void postJson('/api/dialogues/location', { latitude: position.coords.latitude, longitude: position.coords.longitude }).then(()=>{resetDialogues();setLocation('ready');}).catch(()=>setLocation('error'));
+    }, () => setLocation('error'), { enableHighAccuracy: false, timeout: 15000, maximumAge: 3600000 });
+  };
+  const clearLocation = () => { void postJson('/api/dialogues/location', {clear:true}).then(()=>{resetDialogues();setLocation('unset');}).catch(()=>setLocation('error')); };
+  const { inMaster, floorsOpen, goMaster, toggleFloors, effectsEnabled, toggleEffects } = useOffice();
   const { provider, setProvider, busy } = useManagers();
   const projects = useOffice((s) => s.projects);
   const floorId = useOffice((s) => s.floorId);
@@ -57,6 +69,11 @@ export function OfficeHUD() {
             <option value="claude">Claude Code</option><option value="codex">Codex</option>
           </select>
         </label>
+        <details className="life-controls"><summary>Ofis yaşamı</summary><div className="life-options">
+        <button type="button" className="ghost" aria-pressed={effectsEnabled} onClick={toggleEffects} title="Işık ve ofis efektlerini aç veya kapat">Atmosfer {effectsEnabled ? 'açık' : 'kapalı'}</button>
+        <button type="button" className="ghost" onClick={useLocation} disabled={location === 'loading'} title="Hava sohbetleri için yaklaşık konumunu kullan; yalnız hava servisiyle paylaşılır">{location === 'loading' ? 'Konum alınıyor…' : location === 'ready' ? 'Hava · konum açık' : location === 'error' ? 'Konum alınamadı · tekrar dene' : 'Konumumu kullan'}</button>
+        {location === 'ready' && <button type="button" className="ghost" onClick={clearLocation} aria-label="Hava konumunu sil">× Konum</button>}
+        </div></details>
         <Stat label="Ajan" value={summary.total} />
         <Stat label="Aktif" value={active} tone="ok" />
         <Stat label="Boşta" value={summary.idle} />

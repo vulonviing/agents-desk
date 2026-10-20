@@ -34,6 +34,7 @@ export function buildFloorMap(plan: FloorPlan, _floor: Floor, floorIndex = 0): F
   const collision = b.tileLayer('collision', false);
   const furnitureList = b.objectLayer('furniture');
   const deskList = b.objectLayer('desks');
+  const spotList = b.objectLayer('spots');
   const zoneList = b.objectLayer('zones');
   const p: Placer = { b, list: furnitureList };
   const at = (x: number, y: number) => y * W + x;
@@ -126,6 +127,11 @@ export function buildFloorMap(plan: FloorPlan, _floor: Floor, floorIndex = 0): F
     const RW = r.w * T;
     b.rect(zoneList, r.name, 'room', X, Y, RW, r.h * T, [prop('roomId', r.id), prop('kind', r.kind), prop('name', r.name), prop('doorSide', r.door.side)]);
     decorate(p, r, X, Y, RW);
+    const kind = r.kind === 'kitchen' ? 'coffee' : r.kind === 'garden' ? 'window' : r.kind === 'meeting' ? 'sofa' : null;
+    if (kind) {
+      const x = r.x + r.w - 3, y = r.y + 3;
+      b.point(spotList, r.id, 'spot', (x + 0.5) * T, (y + 1) * T, [prop('kind', kind), prop('tx', x), prop('ty', y)]);
+    }
     if (r.kind === 'project' && r.cell && r.room) {
       const count = Math.min(6, Math.max(1, r.room.stations.length));
       const cols = Math.min(3, count, Math.floor((r.w - 2) / 5));
@@ -134,7 +140,8 @@ export function buildFloorMap(plan: FloorPlan, _floor: Floor, floorIndex = 0): F
         const tx = count === 1 ? r.cell.tx : r.x + Math.floor((r.w - cols * 5) / 2) + (i % cols) * 5;
         const ty = r.y + 4 + Math.floor(i / cols) * 5;
         const { seatX, seatY } = deskSet(p, tx * T, ty * T, { roomId: r.room.id });
-        b.point(deskList, `${r.room.id}:${i}`, 'desk', seatX, seatY, [prop('roomId', i === 0 ? r.room.id : `${r.room.id}:preview:${i}`), prop('stationId', r.room.stations[i]?.id ?? '')]);
+        for (let y = ty + 1; y < ty + 3; y++) for (let x = tx + 1; x < tx + 4; x++) if (inside(x, y)) collision[at(x, y)] = COLLISION_GID;
+        b.point(deskList, `${r.room.id}:${i}`, 'desk', seatX, seatY, [prop('roomId', i === 0 ? r.room.id : `${r.room.id}:preview:${i}`), prop('stationId', r.room.stations[i]?.id ?? ''), prop('tx', tx), prop('ty', ty)]);
       }
       if (rows > 1) sprite(p, 'partition', (r.x + r.w / 2) * T, (r.y + 8) * T);
     }
@@ -158,6 +165,14 @@ export function buildFloorMap(plan: FloorPlan, _floor: Floor, floorIndex = 0): F
   if (plan.connector) decorateConnector(p, plan.connector, theme);
   decorateLobby(p, first, lift, theme);
 
+  for (const object of furnitureList) {
+    const props = Object.fromEntries((object.properties ?? []).map(p => [p.name, p.value]));
+    if (props.layer === 'floor' || props.layer === 'wall' || props.roomId || props.role === 'monitor') continue;
+    const frame = String(props.frame);
+    if (!/plant|flowerbox|tree|sofa|table|rack_|filecab|vending|printer3d|pedestal|fountain/.test(frame)) continue;
+    const x = Math.floor(object.x / T), y = Math.ceil(object.y / T) - 1;
+    if (inside(x, y)) collision[at(x, y)] = COLLISION_GID;
+  }
   return { map: b.build(TILESETS), worldW: W * T, worldH: H * T };
 }
 

@@ -54,8 +54,10 @@ test('a live session: its station\'s agent gets the tool, file, model and waitin
   const live = { cv: { state: 'working', reason: 'tool', tool: 'Edit', file: 'x.js', stationId: 'skill:a', ageSec: 4, model: 'claude-opus-5-5' } };
   const agents = byName(buildAgents({ data: data(r), live, now: NOW }));
   assert.deepEqual([agents.a.status, agents.a.currentTask, agents.a.model, agents.b.status, agents.CV.status], ['working', 'Edit: x.js', 'claude-opus-5-5', 'idle', 'idle']);
-  const waiting = byName(buildAgents({ data: data(r), live: { cv: { state: 'waiting', reason: 'turn', stationId: null, ageSec: 20 } }, now: NOW }));
+  const waiting = byName(buildAgents({ data: data(r), live: { cv: { state: 'waiting', reason: 'tool', stationId: null, ageSec: 20 } }, now: NOW }));
   assert.deepEqual([waiting.CV.status, waiting.CV.waiting, waiting.CV.currentTask, waiting.a.status], ['thinking', true, 'Cevap / izin bekliyor', 'idle']);
+  const ended = byName(buildAgents({data:data(r),live:{cv:{state:'waiting',reason:'turn',stationId:null,ageSec:20}},now:NOW}));
+  assert.deepEqual([ended.CV.status,ended.CV.waiting,ended.CV.cliActive],['idle',false,false]);
 });
 
 test('a live session in an embedded repo counts for the room', () => {

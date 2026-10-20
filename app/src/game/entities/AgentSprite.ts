@@ -5,7 +5,7 @@ import type { Dir } from '../systems/behavior';
 // One office character: a 16x32 sprite with a soft shadow, a status bubble above the head, a selection ring
 // and a name label. The container's depth follows the feet so characters sort correctly with the furniture.
 
-export type Visual = 'idle' | 'work' | 'think-seated' | 'think' | 'wait' | 'walk' | 'complete' | 'error' | 'offline' | 'coffee' | 'cooler' | 'sofa' | 'window' | 'visit';
+export type Visual = 'idle' | 'work' | 'think-seated' | 'think' | 'wait' | 'walk' | 'complete' | 'error' | 'offline' | 'coffee' | 'cooler' | 'sofa' | 'window' | 'visit' | 'queue' | 'printer' | 'read';
 
 export class AgentSprite {
   readonly id: string;
@@ -17,6 +17,8 @@ export class AgentSprite {
   private readonly activity: Phaser.GameObjects.Graphics;
   private speech: Phaser.GameObjects.Container | null = null;
   private speechUntil = 0;
+  private speechWidth = 0;
+  private speechHeight = 0;
   private speechObserved = false;
   private variant: string;
   private visual: Visual | null = null;
@@ -64,22 +66,42 @@ export class AgentSprite {
     if (on && !this.speechObserved) { this.speech?.destroy(true); this.speech = null; }
   }
 
-  say(text: string, observed = false, duration = 4200, heading?: string) {
+  clearAmbientSpeech() { if (!this.speechObserved) { this.speech?.destroy(true); this.speech = null; } }
+
+  say(text: string, observed = false, duration = 4200, heading?: string, sourceUrl?: string) {
     this.speech?.destroy(true);
     this.speechObserved = observed;
-    const label = this.scene.add.text(0, 0, `${heading ?? (observed ? 'CLI gözlemi' : 'Mola')}\n${text}`, { fontFamily: FONT, fontSize: '7px', color: observed ? '#245b48' : '#51475c', wordWrap: { width: 106 }, lineSpacing: 2 }).setResolution(4);
-    const width = Math.max(64, label.width + 14), height = label.height + 12;
+    const label = this.scene.add.text(0, 0, `${heading ?? (observed ? 'CLI gözlemi\n' : '')}${heading ? '\n' : ''}${text}${sourceUrl ? ' ↗' : ''}`, { fontFamily: FONT, fontSize: '10px', color: observed ? '#245b48' : '#51475c', wordWrap: { width: 152 }, lineSpacing: 4 }).setResolution(4);
+    if (sourceUrl && /^https:\/\//.test(sourceUrl)) label.setInteractive({ useHandCursor: true }).on('pointerup', (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
+      event.stopPropagation(); window.open(sourceUrl, '_blank', 'noopener,noreferrer');
+    });
+    const width = Math.max(88, label.width + 24), height = label.height + 20;
     const bg = this.scene.add.graphics().fillStyle(observed ? 0xe3fff0 : 0xfff8e8).fillRoundedRect(-width / 2, -height, width, height, 4);
     bg.fillTriangle(-4, -1, 4, -1, 0, 5);
-    label.setPosition(-width / 2 + 7, -height + 6);
+    label.setPosition(-width / 2 + 12, -height + 10);
     this.speech = this.scene.add.container(this.x, this.y - 44, [bg, label]).setDepth(5500);
+    this.speechWidth = width; this.speechHeight = height;
     this.speechUntil = this.scene.time.now + duration;
+    this.positionSpeech();
   }
 
   updateSpeech() {
     if (!this.speech) return;
     if (this.scene.time.now > this.speechUntil) { this.speech.destroy(true); this.speech = null; }
-    else this.speech.setPosition(this.x, this.y - 44);
+    else this.positionSpeech();
+  }
+
+  private positionSpeech() {
+    if (!this.speech) return;
+    const camera = this.scene.cameras.main, zoom = camera.zoom;
+    // Maintain readable text at floor-fit zoom and keep bubbles within the visible canvas.
+    const scale = Math.min(Math.max(1, 1.8 / zoom), (camera.width - 24) / (this.speechWidth * zoom));
+    this.speech.setScale(scale);
+    this.speech.setVisible(camera.worldView.contains(this.x, this.y));
+    const half = this.speechWidth * scale / 2, margin = 8 / zoom, view = camera.worldView;
+    const x = Phaser.Math.Clamp(this.x, view.left + half + margin, view.right - half - margin);
+    const y = Math.max(view.top + this.speechHeight * scale + margin, this.y - 44);
+    this.speech.setPosition(x, y);
   }
 
   setVariant(variant: string) {
@@ -122,6 +144,9 @@ export class AgentSprite {
       case 'work': anim = key('sit'); break;
       case 'think-seated': anim = key('sit'); bubble = { anim: 'bubble:think' }; break;
       case 'think': bubble = { anim: 'bubble:think' }; break;
+      case 'read': anim = key('sit'); bubble = { frame: 'papers' }; break;
+      case 'printer': anim = key('idle-up'); break;
+      case 'queue': anim = key('phone'); break;
       case 'wait': bubble = { frame: 'bubble_question' }; break;
       case 'walk': anim = key(`run-${dir}`); break;
       case 'complete': bubble = { frame: 'bubble_check' }; break;
@@ -158,6 +183,7 @@ export class AgentSprite {
   private reactions(v: Visual) {
     this.tween?.remove();
     this.sprite.setY(0).setX(0);
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
     if (v === 'complete') {
       this.tween = this.scene.tweens.add({ targets: this.sprite, y: -4, duration: 160, yoyo: true, repeat: 2, ease: 'Sine.easeOut', onComplete: () => this.sprite.setY(0) });
     } else if (v === 'error') {

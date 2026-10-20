@@ -6,6 +6,7 @@ import { useManagers } from '../../stores/managersStore';
 import { useOffice } from '../../stores/officeStore';
 import { Avatar } from '../AgentPanel/Avatar';
 import { FormattedMessage } from './FormattedMessage';
+import { chatTimeline } from './timeline';
 
 const EMPTY: never[] = [];
 const CLI = { claude: 'Claude Code', codex: 'Codex' } as const;
@@ -33,8 +34,9 @@ export function ChatPanel({ agentId }: { agentId: string }) {
   const stationName = (id: string | null) => room?.stations.find((s) => s.id === id)?.name ?? id ?? '';
   // observed events of this agent (oldest first), shown as cards under the messages
   const cards = useMemo(() => (observations ?? [])
-    .filter((e) => e.roomId === dto?.roomId && (dto?.coordinator ? e.sessionId === dto.sessionId || e.coordinatorId === dto.id : e.to === dto?.deskId || e.from === dto?.deskId))
-    .slice(-6), [observations, dto]);
+    .filter((e) => e.roomId === dto?.roomId && e.provider === (dto?.sessionProvider ?? provider) && (dto?.coordinator ? e.sessionId === dto.sessionId || e.coordinatorId === dto.id : e.to === dto?.deskId || e.from === dto?.deskId))
+    .slice(-6), [observations, dto, provider]);
+  const timeline = useMemo(() => chatTimeline(messages, cards), [messages, cards]);
   if (!dto) return null;
   const bound = dto.sessionProvider ?? null;
   const wrongCli = !!bound && bound !== provider;
@@ -43,7 +45,7 @@ export function ChatPanel({ agentId }: { agentId: string }) {
 
   const submit = () => {
     const t = text.trim();
-    if (!t || busy || wrongCli) return;
+    if (!t || busy || working || wrongCli) return;
     setText('');
     void send(agentId, t);
   };
@@ -63,25 +65,23 @@ export function ChatPanel({ agentId }: { agentId: string }) {
       {wrongCli && <p className="warn">Bu oturum {CLI[bound]} kullanıyor. Üst bardan aynı CLI’ı seç.</p>}
       <div className="chat-log" aria-live="polite">
         {messages.length === 0 && !busy && <p className="muted">Henüz mesaj yok. Bu ofiste ne istediğini yaz; CLI’ın yaptığı işler aşağıda kartlar olarak görünür.</p>}
-        {messages.map((m, i) => (
-          <div key={`${m.at}-${i}`} className={`msg ${m.role}`}><FormattedMessage text={m.text} /></div>
-        ))}
-        {busy && <div className="msg assistant typing">yazıyor…</div>}
-        {cards.map((e) => (
-          <div key={e.id} className="activity-card">
-            <span aria-hidden="true">{e.kind === 'handoff' ? '⇄' : '⚙'}</span>
+        {timeline.map(item => {
+          if (item.type === 'message') return <div key={item.key} className={`msg ${item.message.role}`}><FormattedMessage text={item.message.text} /></div>;
+          const e = item.event;
+          return <div key={item.key} className="activity-card">
+            <span aria-hidden="true">{e.kind === 'completed' ? '✔' : e.kind === 'error' ? '⛔' : e.kind === 'handoff' ? '⇄' : '⚙'}</span>
             <div>
-              <strong>{e.kind === 'handoff' ? `${stationName(e.from)} → ${stationName(e.to)}` : `${stationName(e.to)}`}</strong>
-              <small>{e.kind === 'handoff' ? `${e.file ?? 'dosya'} aktarıldı` : `${e.tool} · ${timeAgo(e.at)}`}</small>
+              <strong>{e.kind === 'completed' ? 'Tur tamamlandı' : e.kind === 'error' ? 'Tur kesildi' : e.kind === 'handoff' ? `${stationName(e.from)} → ${stationName(e.to)}` : `${stationName(e.to)}`}</strong>
+              <small>{e.kind === 'handoff' ? `${e.file ?? 'dosya'} aktarıldı` : e.kind === 'activation' ? `${e.tool} · ${timeAgo(e.at)}` : timeAgo(e.at)}</small>
             </div>
+          </div>;
+        })}
+        {(busy || working) && <div className="activity-card live" role="status">
+          <span aria-hidden="true">●</span>
+          <div><strong>{busy ? 'Yanıt hazırlanıyor…' : 'CLI çalışıyor'}</strong>
+            {working && dto.observation?.tool && <small>{dto.observation.tool}{dto.observation.file ? ` · ${dto.observation.file}` : ''}</small>}
           </div>
-        ))}
-        {working && dto.observation && (
-          <div className="activity-card live">
-            <span aria-hidden="true">●</span>
-            <div><strong>CLI çalışıyor</strong><small>{dto.observation.tool ?? 'düşünüyor'}{dto.observation.file ? ` · ${dto.observation.file}` : ''}</small></div>
-          </div>
-        )}
+        </div>}
         <div ref={end} />
       </div>
       <div className="chat-input">
@@ -102,7 +102,7 @@ export function ChatPanel({ agentId }: { agentId: string }) {
           }}
         />
         <div className="chat-actions">
-          <button type="button" className="primary" disabled={busy || !text.trim() || wrongCli} onClick={submit}>Gönder</button>
+          <button type="button" className="primary" disabled={busy || working || !text.trim() || wrongCli} onClick={submit}>Gönder</button>
           <button type="button" disabled={busy || messages.length === 0} onClick={() => void reset(agentId)}>{dto.sessionId ? 'Görünümü temizle' : 'Yeni konuşma'}</button>
         </div>
         <p className="muted">Sohbet salt-okunurdur; gerçek CLI’ın işleri yukarıdaki kartlarda ve simlerde görünür.</p>

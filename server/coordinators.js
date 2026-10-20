@@ -15,13 +15,14 @@ export function createCoordinators() {
         const id = index === 0 ? `${room.id}#project` : `${room.id}#cli:${session.id.slice(8)}`;
         const chat = chatState(id);
         const active = !!chat?.busy || !!(session && session.state === 'working' && session.ageSec < 120);
+        const waiting = !!session && !active && session.state === 'waiting' && !['turn', 'opened'].includes(session.reason) && session.ageSec < 120;
         const at = session ? new Date(session.at).toISOString() : chat?.at ?? null;
         const original = residents.find(a => a.id === `${room.id}#project`);
         const name = names[room.id] ?? `${room.name} Koordinatörü`;
         result.push({ id, roomId: room.id, floorId: floor.id, kind: 'project', coordinator: true,
           name: index ? `${name} ${index + 1}` : name, role: 'Ofis koordinatörü', skill: null,
           variant: original?.variant ?? VARIANTS[([...id].reduce((n,c) => n + c.charCodeAt(0), 0) + index) % VARIANTS.length],
-          status: active ? 'working' : 'idle', waiting: !!session && !active, cliActive: active,
+          status: active ? 'working' : waiting ? 'thinking' : 'idle', waiting, cliActive: active,
           sessionId: session?.id ?? null, sessionProvider: session?.provider ?? chat?.provider ?? null,
           sessionMode: session ? 'observed' : chat?.sessionId ? 'desk' : 'ready',
           targetStationId: chat?.stationId ?? (session && (!chat?.busy || session.at >= Date.parse(chat.at)) ? session.stationId : null) ?? null,
@@ -42,7 +43,7 @@ export function createCoordinators() {
         result.push({ id: `${room.id}#task:${station.id}`, roomId: room.id, floorId: floor.id, kind: 'project', stationWorker: true,
           name: station.name, role: `${room.name} · iş istasyonu`, skill: null,
           variant: VARIANTS[[...`${room.id}:${station.id}`].reduce((n,c)=>n+c.charCodeAt(0),0)%VARIANTS.length],
-          status: session?.state === 'working' ? 'working' : 'idle', waiting: session?.state === 'waiting', cliActive: session?.state === 'working',
+          status: session?.state === 'working' ? 'working' : 'idle', waiting: session?.state === 'waiting' && !['turn', 'opened'].includes(session?.reason), cliActive: session?.state === 'working',
           currentTask: session?.tool ?? null, model: session?.model ?? null, deskId: station.id, deskName: station.name,
           lastActivity: original?.lastActivity ?? null, recent: original?.recent.filter(r=>r.stationId===station.id) ?? [], level: room.level,
         });
@@ -50,7 +51,7 @@ export function createCoordinators() {
     }
     for (const coordinator of result.filter(a => a.coordinator && a.cliActive && a.targetStationId)) {
       const worker = result.find(a => !a.coordinator && a.roomId === coordinator.roomId && a.deskId === coordinator.targetStationId);
-      if (worker) { worker.cliActive = true; worker.status = 'working'; worker.currentTask = `${coordinator.name} üzerinden gelen iş`; }
+      if (worker) { worker.cliActive = true; worker.status = 'working'; worker.currentTask = `${coordinator.name} üzerinden gelen iş`; worker.observation = coordinator.observation; }
     }
     return result;
   } };

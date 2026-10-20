@@ -82,11 +82,12 @@ collection/filtering, CV tailoring, cover-letter review, quality/delivery and ev
 Mahur uses original purple acoustic tiles, vinyl art and music/design workspaces; PaperHub uses teal
 research walls, paper boards and book storage. Offices with up to six stations share one compact room
 and coordinator corner. Larger suites add a coordinator room with shared desks. Partitions, furniture,
-open doors and both corridors participate in pathfinding.
+open doors and the central shared corridor participate in pathfinding.
 
-Floor footprints reflect the coordinator plus station population and use viewport-aware wings. Long
-entrance/lounge strips and reception desks are removed. Multiple wings retain only a narrow connecting
-corridor. Floor actors have separate coordinator positions and up to six visible station workers.
+Floor footprints reflect coordinator and station population. Small floors use two office rows and one
+central corridor; large floors use three rows, two corridors and a central connector. Floor actors have
+separate coordinator positions and up to six visible station workers per office. Actual collision cells
+and service spots drive cross-office navigation; there are no decorative perimeter corridors.
 
 Idle residents stagger walks, coffee/water breaks, window visits and short social exchanges. These are
 explicitly ambient life and never start models or imply CLI work. A real assignment selects one stable
@@ -108,3 +109,20 @@ notification-to-browser latency measured 131–155 ms in these fixtures, not a u
 It checks dedicated/shared rooms, messages/calls/visits and return-to-desk behavior, plus 1710×930,
 1470×850 and 1280×760 laptop viewports. The observed local screen is 2560×1664 Retina, scaled to
 1710×1112 by macOS, matching [Apple's M4 MacBook Air specifications](https://support.apple.com/en-ie/122209).
+
+## Ambient dialogue and public briefings
+
+Dialogue pools use the newest available low-effort Gemini Flash through the user's Antigravity CLI.
+Lazy 90-minute refreshes and persisted call/token/quota guards bound consumption; no model runs per bubble.
+`server/briefing-mcp.js` exposes a Desk-owned public-news/weather tool, called by `briefing-client.js`.
+Curator roles shape discussion without granting tools to project coordinators. News is dated and expires;
+weather requires explicit browser geolocation, stored rounded locally and omitted from model input.
+Source-bound bubbles link to the original public source. No private conversation text enters the pool.
+
+Observed turn endings drive completion/error indicators and service-printer visits. Session visitors use
+walkable arrival/departure paths. Ambient activities use needs, service reservations and bounded queues;
+work/waiting preempts them. Office-life controls expose atmosphere opt-out and weather-location removal.
+
+Shared floor pools and office pools use four-turn conversations, proximity holds and interruption. Floor navigation reuses the office needs controller over actual Tiled collision cells, allowing cross-office visits. Ambient positions reset when changing views. North office departments meet the external wall, eliminating the unused upper hallway.
+
+`dialogue-creator.js` makes daily Flash editorial plans from role missions. The public-briefing MCP searches Bing News for these professional queries; both editorial and dialogue calls share the persistent budget. Speech avoids skill-name addresses and topic headings. Clicking either participant opens a live popup of spoken turns only; the last 20 ambient exchanges remain in scene memory, never on disk.

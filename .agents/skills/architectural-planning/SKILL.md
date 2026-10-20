@@ -65,3 +65,6 @@ Method: decide the **circulation** first, then the rooms around it, then the fur
 ## Read when needed
 - Concrete shell rules → `building-shell`. Interior of offices → `office-layout-design`. Look and finish → `office-art-direction`.
 - Background used for these rules: double-loaded corridors, primary circulation/core logic and egress (workplace design references).
+
+## Circulation earns its space
+Every corridor must connect occupied destinations or an entrance/service. Remove redundant perimeter strips and dead-end gutters. In a double-loaded office, north rooms meet the outer wall; the central corridor serves their south doors. Preserve enough internal desk approach space instead of adding an exterior hallway.

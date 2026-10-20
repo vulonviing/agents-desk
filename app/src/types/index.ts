@@ -158,7 +158,7 @@ export interface DispatchResult {
   clarification?: { id: string; by: string; question: string; options: { id: string; name: string }[] };
 }
 
-export interface Observation { sessionId?: string; coordinatorId?: string; id: string; kind: 'activation' | 'handoff'; at: string; roomId: string; provider: 'claude' | 'codex'; from: string | null; to: string; file: string | null; tool: string }
+export interface Observation { sessionId?: string; coordinatorId?: string; id: string; kind: 'activation' | 'handoff' | 'completed' | 'error'; at: string; roomId: string; provider: 'claude' | 'codex'; from: string | null; to: string; file: string | null; tool: string }
 
 export interface OfficeSnapshot {
   observations?: Observation[];

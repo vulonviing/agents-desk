@@ -31,3 +31,9 @@ Goal: the UI explains the office at a glance and never fights the canvas. React 
 
 ## Read when needed
 - Plate/typography details → `office-art-direction`. Shell signage → `building-shell`.
+
+## Coordinator roster identity
+Coordinator cards use a distinct dark green background and green border, with readable pale text. Keep coordinators first and retain textual role labels; color alone must not convey the role.
+
+## Speech readability
+Ambient and observed speech use 10 px world text, wider padded bubbles, and counter-scaling below 1.8× camera zoom. Keep text around 18 screen pixels or larger at fit zoom; constrain bubbles to the visible canvas. Verify floor fit, office fit, zoomed view and mobile.
