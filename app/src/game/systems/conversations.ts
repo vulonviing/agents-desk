@@ -4,7 +4,8 @@ export interface Exchange { text: string; reply?: string; followUp?: string; ans
 export interface Participant { id: string; pos: Point; busy: boolean }
 export interface ConversationTranscript { id: string; a: string; b: string; turns: { speakerId: string; text: string }[]; active: boolean; source?: DialogueSource }
 interface Conversation { id: string; a: string; b: string; lines: string[]; nextAt: number; index: number; source?: DialogueSource; concept?: string }
-export interface Speech { id: string; text: string; duration: number; source?: DialogueSource; concept?: string }
+export const turnDuration = (text: string) => Math.max(6500,Math.min(11500,3000+text.length*95));
+export interface Speech { threadId:string; id: string; text: string; duration: number; source?: DialogueSource; concept?: string }
 
 /** Four timed turns, physical proximity, and interruption; no model calls or fabricated work. */
 export class ConversationDirector {
@@ -41,8 +42,8 @@ export class ConversationDirector {
         return false;
       }
       if (now >= c.nextAt) {
-        const text=c.lines[c.index]!,duration=Math.max(2200,Math.min(5000,1000+text.length*45));
-        speeches.push({id:c.index%2===0?c.a:c.b,text,duration,source:c.source,concept:c.concept});
+        const text=c.lines[c.index]!,duration=turnDuration(text);
+        speeches.push({threadId:c.id,id:c.index%2===0?c.a:c.b,text,duration,source:c.source,concept:c.concept});
         this.history.find(h=>h.id===c.id)?.turns.push({speakerId:c.index%2===0?c.a:c.b,text});
         c.index++;c.nextAt=now+duration;
       }

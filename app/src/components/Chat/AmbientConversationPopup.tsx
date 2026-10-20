@@ -25,6 +25,7 @@ export function AmbientConversationPopup() {
       {conversation.active&&<span className="ambient-next">Konuşuyorlar…</span>}
       <div ref={end}/>
     </div>
-    {conversation.source&&<a href={conversation.source.url} target="_blank" rel="noopener noreferrer">{conversation.source.publisher} · kaynak ↗</a>}
+    {!conversation.source&&conversation.sourceUrl&&<a href={conversation.sourceUrl} target="_blank" rel="noopener noreferrer">Kaynak ↗</a>}
+    {conversation.source&&<a href={conversation.source.url} target="_blank" rel="noopener noreferrer">{conversation.source.publisher} · {new Date(conversation.source.publishedAt).toLocaleDateString('tr-TR')} ↗</a>}
   </section>;
 }

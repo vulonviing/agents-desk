@@ -37,3 +37,8 @@ Coordinator cards use a distinct dark green background and green border, with re
 
 ## Speech readability
 Ambient and observed speech use 10 px world text, wider padded bubbles, and counter-scaling below 1.8× camera zoom. Keep text around 18 screen pixels or larger at fit zoom; constrain bubbles to the visible canvas. Verify floor fit, office fit, zoomed view and mobile.
+
+## Conversation indicators and plates
+Active paired conversations show a small clickable chat badge beside both sims. The badge opens the same live conversation popup and disappears when the exchange ends or is interrupted; it never opens coordinator CLI chat. Office/floor plates use 10 px titles, 8 px secondary text and padded backgrounds, with counter-scaling below 1.2× zoom. Check all floors for window/door overlaps after enlarging them.
+
+Speech cards consume pointer clicks before any floor room zone, station or agent underneath. Clicking any part of a visible card opens its conversation (or single utterance); source links belong in that popup. Never let a bubble click navigate into an office.

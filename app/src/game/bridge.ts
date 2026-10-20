@@ -28,6 +28,7 @@ export interface AmbientConversation {
   participants: {id:string;name:string}[];
   turns: {speakerId:string;text:string}[];
   active: boolean;
+  sourceUrl?: string;
   source?: import('../services/dialogues').DialogueSource;
 }
 

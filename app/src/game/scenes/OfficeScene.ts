@@ -16,6 +16,7 @@ import { createWorker, stepWorker, requestSpot, walkTo, type Worker } from '../s
 import { deliveryMode, type DeliveryMode } from '../systems/dispatch';
 import { findPath } from '../systems/pathfinding';
 import { createAtmosphere, observeAtmosphere, printerState, skyAt } from '../systems/atmosphere';
+import { layoutSpeech, speechAt } from '../systems/speechStack';
 import { ConversationDirector, type Participant } from '../systems/conversations';
 import { floorWalkLayout } from '../systems/floorLife';
 import { stationStatus } from '../systems/stationStatus';
@@ -48,7 +49,7 @@ export class OfficeScene extends Phaser.Scene {
   private cells = new Map<string, { x: number; y: number; w: number; h: number }>(); // stationId → desk cell (room view)
   private layout: RoomLayout | null = null;
   private workers = new Map<string, Worker>();
-  private conversations = new ConversationDirector();
+  private conversations = new ConversationDirector(1);
   private nextEncounter = 0;
   private walkLayout: RoomLayout | null = null;
   private floorMapData: TiledMap | null = null;
@@ -75,6 +76,8 @@ export class OfficeScene extends Phaser.Scene {
   private observedIds = new Set<string>();
   private speechKey = '';
   private conversationAgent: string | null = null;
+  private pressedSpeech: ReturnType<typeof speechAt>;
+  private conversationOpeners = new Map<string,()=>void>();
   private conversationRevision = '';
   private nextAmbientAt = 0;
   private nextTalk = new Map<string, number>();
@@ -104,6 +107,7 @@ export class OfficeScene extends Phaser.Scene {
     if (this.renderer.type === Phaser.WEBGL) this.cameras.main.postFX.addVignette(0.5, 0.5, 0.92, 0.28);
     this.cam = new CameraController(this);
     this.cam.onZoom = (z) => this.bridge.onZoom(z);
+    this.input.on('pointerdown',(p:Phaser.Input.Pointer)=>{const w=this.cameras.main.getWorldPoint(p.x,p.y);this.pressedSpeech=speechAt(this,w.x,w.y);});
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.onPointerUp(p));
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onPointerMove(p));
     this.time.addEvent({ delay: 420, loop: true, callback: () => this.animateMonitors() });
@@ -146,7 +150,7 @@ export class OfficeScene extends Phaser.Scene {
     this.masterSpeech = null;
     this.speechKey = '';
     this.nextTalk.clear(); this.nextAmbientAt = 0;
-    this.conversationAgent = null; this.conversationRevision = ''; this.bridge.onConversation?.(null);
+    this.conversationAgent = null; this.conversationOpeners.clear(); this.conversationRevision = ''; this.bridge.onConversation?.(null);
     this.transits.clear(); this.seenSessions.clear(); this.receiptPending.clear();
     this.atmosphere = createAtmosphere(); this.atmosphereInk?.destroy(); this.atmosphereInk = null;
     this.infoLabel?.destroy(); this.infoLabel = null; this.clocks = []; this.lastAtmosphereTick = -1;
@@ -336,6 +340,11 @@ export class OfficeScene extends Phaser.Scene {
       let s = this.agents.get(a.id);
       if (!s) {
         s = new AgentSprite(this, a.id, a.variant, a.name);
+        s.setSpeechAction((text,threadId,observed,sourceUrl)=>{
+          if(observed){this.bridge.onAgentClick(a.id);return;}
+          if(threadId&&this.publishConversation(a.id,true)){this.conversationAgent=a.id;return;}
+          this.bridge.onConversation?.({id:`speech:${a.id}`,participants:[{id:a.id,name:a.name}],turns:[{speakerId:a.id,text}],active:false,sourceUrl},true);
+        });
         this.agents.set(a.id, s);
         this.placeInitial(a, s);
       } else {
@@ -486,6 +495,7 @@ export class OfficeScene extends Phaser.Scene {
     this.updateAtmosphere();
     for (const s of this.agents.values()) s.updateSpeech();
     this.stepConversations();
+    layoutSpeech(this);
     if (this.state.view?.kind === 'floor') { this.animateFloorLife(Math.min(0.1, delta / 1000)); return; }
     if (this.state.view?.kind !== 'room' || !this.layout) return;
     const dt = Math.min(0.1, delta / 1000);
@@ -534,7 +544,7 @@ export class OfficeScene extends Phaser.Scene {
         } else {
           const kind: LineKind = w.doing === 'coffee' ? 'coffee' : w.doing === 'cooler' ? 'water' : w.doing === 'window' ? 'window' : w.doing === 'sofa' ? 'news' : 'desk';
           const line = this.ambientLine(officeId, kind, a.name, undefined, () => this.rand());
-          if (line) s.say(line.text, false, 5500, undefined, line.source?.url);
+          if (line) s.say(line.text, false, 8000, undefined, line.source?.url);
         }
       }
       // now and then a resident at an idle desk thinks aloud (ambient only, never real work)
@@ -543,8 +553,8 @@ export class OfficeScene extends Phaser.Scene {
         if (due === undefined) this.nextTalk.set(a.id, this.time.now + 15000 + this.rand() * 30000);
         else if (this.time.now > due) {
           const line = this.ambientLine(a.roomId, 'desk', a.name, undefined, () => this.rand());
-          if (line) s.say(line.text, false, 5500, undefined, line.source?.url);
-          this.nextTalk.set(a.id, this.time.now + 40000 + this.rand() * 50000);
+          if (line) s.say(line.text, false, 8000, undefined, line.source?.url);
+          this.nextTalk.set(a.id, this.time.now + 100000 + this.rand() * 50000);
         }
       }
       if (w.mode === 'walking') {
@@ -618,7 +628,12 @@ export class OfficeScene extends Phaser.Scene {
   }
   private stepConversations() {
     const result=this.conversations.tick(this.time.now,this.talkActors());
-    for(const speech of result.speeches)this.agents.get(speech.id)?.say(speech.text,false,speech.duration,undefined,speech.source?.url);
+    for(const speech of result.speeches)this.agents.get(speech.id)?.say(speech.text,false,speech.duration,undefined,speech.source?.url,speech.threadId);
+    for(const [id,sprite] of this.agents){
+      const talking=this.conversations.holds(id);
+      if(talking&&!this.conversationOpeners.has(id))this.conversationOpeners.set(id,()=>{this.conversationAgent=id;this.publishConversation(id,true);});
+      sprite.setConversing(talking,this.conversationOpeners.get(id));
+    }
     if(this.conversationAgent)this.publishConversation(this.conversationAgent);
     for(const id of result.ended){this.agents.get(id)?.clearAmbientSpeech();const w=this.workers.get(id);if(w?.doing==='visit')w.timer=Math.min(w.timer,1);}
   }
@@ -634,6 +649,7 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   private poseConversation(id:string,sprite:AgentSprite,w:Worker) {
+    if(w.mode!=='seated')sprite.setFeet(w.pos.x*T+T/2,w.pos.y*T+T);
     const partner=this.workers.get(this.conversations.partner(id)??'');
     const dx=partner?partner.pos.x-w.pos.x:0,dy=partner?partner.pos.y-w.pos.y:0;
     const dir=Math.abs(dx)>Math.abs(dy)?dx<0?'left':'right':dy<0?'up':'down';
@@ -653,7 +669,7 @@ export class OfficeScene extends Phaser.Scene {
   private ambientLine(...args: Parameters<typeof pickLine>) {
     if (this.time.now < this.nextAmbientAt) return null;
     const line = pickLine(...args);
-    if (line) this.nextAmbientAt = this.time.now + 4000;
+    if (line) this.nextAmbientAt = this.time.now + 10000;
     return line;
   }
 
@@ -747,7 +763,7 @@ export class OfficeScene extends Phaser.Scene {
       if(w.mode==='doing'&&before!=='doing'){
         const other=[...this.workers.values()].find(o=>o.id!==w.id&&o.stationId===w.spotId);
         if(w.doing==='visit'&&other)this.tryConversation(w.id,other.id);
-        else if(w.doing!=='queue'){const kind:LineKind=w.doing==='coffee'?'coffee':w.doing==='cooler'?'water':w.doing==='window'?'window':w.doing==='sofa'?'news':'desk';const line=this.ambientLine(a.roomId,kind,a.name,undefined,()=>this.rand());if(line)sprite.say(line.text,false,5000,undefined,line.source?.url);}
+        else if(w.doing!=='queue'){const kind:LineKind=w.doing==='coffee'?'coffee':w.doing==='cooler'?'water':w.doing==='window'?'window':w.doing==='sofa'?'news':'desk';const line=this.ambientLine(a.roomId,kind,a.name,undefined,()=>this.rand());if(line)sprite.say(line.text,false,8000,undefined,line.source?.url);}
       }
       return;
     }
@@ -826,7 +842,7 @@ export class OfficeScene extends Phaser.Scene {
       if(w.mode==='doing'&&before!=='doing'&&w.doing!=='queue'){
         const other=workers.find(o=>o.id!==w.id&&o.stationId===w.spotId);
         if(w.doing==='visit'&&other)this.tryConversation(w.id,other.id);
-        else {const kind:LineKind=w.doing==='coffee'?'coffee':w.doing==='window'?'window':w.doing==='sofa'?'news':'desk';const line=this.ambientLine(`floor:${a.floorId}`,kind,a.name,undefined,()=>this.rand());if(line)sprite.say(line.text,false,5000,undefined,line.source?.url);}
+        else {const kind:LineKind=w.doing==='coffee'?'coffee':w.doing==='window'?'window':w.doing==='sofa'?'news':'desk';const line=this.ambientLine(`floor:${a.floorId}`,kind,a.name,undefined,()=>this.rand());if(line)sprite.say(line.text,false,8000,undefined,line.source?.url);}
       }
     }
     this.encounterNearby();
@@ -889,6 +905,7 @@ export class OfficeScene extends Phaser.Scene {
   private onPointerMove(p: Phaser.Input.Pointer) {
     if (p.isDown) return;
     const w = this.cameras.main.getWorldPoint(p.x, p.y);
+    if(speechAt(this,w.x,w.y)){if(this.hoverId)this.agents.get(this.hoverId)?.setHovered(false);this.hoverId=null;this.input.setDefaultCursor('pointer');this.bridge.onAgentHover(null,null);return;}
     const hit = this.agentAt(w.x, w.y);
     const id = hit?.id ?? null;
     if (id !== this.hoverId) {
@@ -906,8 +923,11 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   private onPointerUp(p: Phaser.Input.Pointer) {
+    const pressed=this.pressedSpeech;this.pressedSpeech=undefined;
     if (this.cam.wasDrag || p.getDuration() > 500) return;
     const w = this.cameras.main.getWorldPoint(p.x, p.y);
+    const card = pressed ?? speechAt(this,w.x,w.y);
+    if(card){card.open?.();return;}
     const hit = this.agentAt(w.x, w.y);
     if (hit) {
       if(this.publishConversation(hit.id,true)){this.conversationAgent=hit.id;return;}
@@ -934,8 +954,8 @@ export class OfficeScene extends Phaser.Scene {
    * zoomed out the plate is scaled up so it stays readable, but never wider than `capW` (its own office).
    */
   private makeSign(cx: number, y: number, maxW: number, roomId: string, kind: string, o: { bottom?: boolean; capW?: number } = {}) {
-    const title = this.add.text(0, 2, '', { fontFamily: FONT, fontSize: '8px', color: '#ffffff' }).setOrigin(0.5, 0).setResolution(4);
-    const sub = this.add.text(0, 11, '', { fontFamily: FONT, fontSize: '6px', color: '#9a9db8' }).setOrigin(0.5, 0).setResolution(4);
+    const title = this.add.text(0, 2, '', { fontFamily: FONT, fontSize: '10px', color: '#ffffff' }).setOrigin(0.5, 0).setResolution(4);
+    const sub = this.add.text(0, 16, '', { fontFamily: FONT, fontSize: '8px', color: '#9a9db8' }).setOrigin(0.5, 0).setResolution(4);
     const bg = this.add.graphics();
     const box = this.add.container(cx, y, [bg, title, sub]).setDepth(o.bottom ? y : 5000);
     let width = 40;
@@ -951,18 +971,18 @@ export class OfficeScene extends Phaser.Scene {
         }
         sub.setText(s).setColor(tone).setVisible(!!s);
         const w = Math.min(maxW, Math.ceil(Math.max(title.width, s ? sub.width : 0)) + 10);
-        const h = s ? 19 : 12;
+        const h = s ? 28 : 17;
         const top = o.bottom ? -h : 0;
         width = w;
-        title.setY(top + 2);
-        sub.setY(top + 11);
+        title.setY(top + 3);
+        sub.setY(top + 16);
         bg.clear();
         bg.fillStyle(0x151624, 0.95).fillRect(-w / 2, top, w, h);
         bg.lineStyle(1, this.accent, 1).strokeRect(-w / 2 + 0.5, top + 0.5, w - 1, h - 1);
         bg.fillStyle(0x3a3a50, 1).fillRect(-w / 2 + 1, top + h - 1, w - 2, 1);
       },
       rescale: (zoom: number) => {
-        const want = Math.min(2.4, Math.max(1, 0.95 / zoom));
+        const want = Math.min(2.4, Math.max(1, 1.2 / zoom));
         const cap = o.capW ? Math.max(1, (o.capW - 6) / width) : want;
         box.setScale(Math.min(want, cap));
       },
@@ -987,7 +1007,8 @@ export class OfficeScene extends Phaser.Scene {
           this.makeSign(z.x + z.w / 2, z.y, z.w, z.roomId, z.kind);
         } else {
           // the plate hangs on the top wall of the office
-          this.makeSign(z.x + z.w / 2, z.y + 3, z.w - 6, z.roomId, z.kind, { capW: z.w });
+          const wallSpan = z.kind === 'project' ? Math.max(76, z.w - 112) : z.w - 6;
+          this.makeSign(z.x + z.w / 2, z.y + 3, wallSpan, z.roomId, z.kind, { capW: wallSpan });
         }
       }
       if (this.corridor && !this.zones.some((z) => z.kind === 'elevator')) {

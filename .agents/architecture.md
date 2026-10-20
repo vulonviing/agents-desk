@@ -126,3 +126,5 @@ work/waiting preempts them. Office-life controls expose atmosphere opt-out and w
 Shared floor pools and office pools use four-turn conversations, proximity holds and interruption. Floor navigation reuses the office needs controller over actual Tiled collision cells, allowing cross-office visits. Ambient positions reset when changing views. North office departments meet the external wall, eliminating the unused upper hallway.
 
 `dialogue-creator.js` makes daily Flash editorial plans from role missions. The public-briefing MCP searches Bing News for these professional queries; both editorial and dialogue calls share the persistent budget. Speech avoids skill-name addresses and topic headings. Clicking either participant opens a live popup of spoken turns only; the last 20 ambient exchanges remain in scene memory, never on disk.
+
+Readable speech uses 18-screen-pixel minimum text at ordinary fit zoom. Conversation turns last 6.5–11.5 seconds and share an SMS-style three-card stack, with non-overlapping screen placement. A small chat badge beside each active participant opens the spoken-turn popup. Plates use larger titles and secondary counts.

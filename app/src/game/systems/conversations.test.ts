@@ -7,10 +7,10 @@ describe('four-turn ambient conversations',()=>{
   const d=new ConversationDirector(),actors=new Map([['a',{...a}],['b',{...b}]]);
   expect(d.start(a,b,exchange,100)).toBe(true);
   const spoken=[];
-  for(let t=100;t<30_000;t+=100){const r=d.tick(t,actors);spoken.push(...r.speeches);if(spoken.length===3)expect(d.holds('a')).toBe(true);}
+  for(let t=100;t<60_000;t+=100){const r=d.tick(t,actors);spoken.push(...r.speeches);if(spoken.length===3)expect(d.holds('a')).toBe(true);}
   expect(spoken.map(s=>s.id)).toEqual(['a','b','a','b']);
   expect(spoken.map(s=>s.text)).toEqual(Object.values(exchange));expect(d.holds('a')).toBe(false);
-  expect(d.start(a,b,exchange,30_000)).toBe(false);expect(d.start(a,b,exchange,100_000)).toBe(true);
+  expect(d.start(a,b,exchange,30_000)).toBe(false);expect(d.start(a,b,exchange,120_000)).toBe(true);
  });
  it('cancels on real work, removal or separation and does not speak for an absent listener',()=>{
   const d=new ConversationDirector(),actors=new Map([['a',{...a}],['b',{...b}]]);d.start(a,b,exchange,0);d.tick(0,actors);
@@ -28,7 +28,7 @@ it('conversation inspection reveals only spoken turns and retains them after com
  const d=new ConversationDirector(),actors=new Map([['a',a],['b',b]]);d.start(a,b,exchange,0);
  expect(d.transcriptFor('a')?.turns).toEqual([]);d.tick(0,actors);
  expect(d.transcriptFor('b')?.turns.map(t=>t.text)).toEqual([exchange.text]);
- for(let t=100;t<30000;t+=100)d.tick(t,actors);
+ for(let t=100;t<60000;t+=100)d.tick(t,actors);
  expect(d.transcriptFor('a')?.turns).toHaveLength(4);expect(d.transcriptFor('a')?.active).toBe(false);
  d.clear();expect(d.transcriptFor('a')).toBeUndefined();
 });
