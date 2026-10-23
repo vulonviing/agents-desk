@@ -179,7 +179,7 @@ export function createDeskServer(deps = {}) {
         // current weather for the window glass; needs the user's location permission, shares nothing else
         const location = readLocation();
         if (!Number.isFinite(location?.latitude)) return send(res, 200, { configured: false, weather: null });
-        const result = await briefingOf(dataDir, { ...location }).catch(() => ({ sources: [] }));
+        const result = await briefingOf(dataDir, { ...location, lang: url.searchParams.get('lang') === 'en' ? 'en' : 'tr' }).catch(() => ({ sources: [] }));
         const weather = result.sources?.find((s) => s.kind === 'weather' && s.weather)?.weather ?? null;
         return send(res, 200, { configured: true, weather });
       }

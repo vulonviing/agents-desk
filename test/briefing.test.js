@@ -90,3 +90,12 @@ test('AI discovery retains real community rank and votes without reading discuss
   assert.ok(!urls.some(u => /999|user\//.test(u)));
   const count = urls.length; await b.get({ topics: ['ai'] }); assert.equal(urls.length, count);
 });
+
+test('weather place names follow the requested language and are cached per language', async () => {
+  const urls=[];
+  const fetcher=async url=>{urls.push(url); return new Response(url.includes('/forecast')?JSON.stringify({timezone:'Europe/Berlin',current:{temperature_2m:10,weather_code:61},daily:{}}):url.includes('api-bdc')?JSON.stringify(url.includes('localityLanguage=en')?{city:'Munich',principalSubdivision:'Bavaria',countryName:'Germany'}:{city:'Münih',principalSubdivision:'Bavyera',countryName:'Almanya'}):'<rss></rss>',{status:200,headers:{'content-type':'application/json'}});};
+  const b=createBriefing({dataDir:tmp(),now:()=>at,fetcher});
+  const place=r=>{const w=r.sources.find(s=>s.kind==='weather').weather;return [w.city,w.region,w.country];};
+  assert.deepEqual(place(await b.get({latitude:48.1,longitude:11.6,lang:'en'})),['Munich','Bavaria','Germany']);
+  assert.deepEqual(place(await b.get({latitude:48.1,longitude:11.6})),['Münih','Bavyera','Almanya']);
+});

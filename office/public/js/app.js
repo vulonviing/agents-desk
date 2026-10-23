@@ -155,7 +155,7 @@
     $('zoomIn').setAttribute('aria-label', I.t('zoom.in')); $('zoomOut').setAttribute('aria-label', I.t('zoom.out')); $('zoomReset').setAttribute('aria-label', I.t('zoom.fit'));
     document.querySelector('.zoom').setAttribute('aria-label', I.t('zoom.group'));
   }
-  I.onChange(() => { applyStatic(); applyStatuses(); });
+  I.onChange(() => { applyStatic(); applyStatuses(); void updateWeather(); });
   applyStatic();
 
   // ---------- session continuity: a refresh resumes the same office ----------

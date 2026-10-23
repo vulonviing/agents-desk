@@ -96,7 +96,7 @@ export function createBriefing({ dataDir, fetcher = fetch, now = Date.now, readA
     pending.set(key, promise); return promise;
   }
   const hasLocation = (latitude, longitude) => Number.isFinite(latitude) && Number.isFinite(longitude) && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180;
-  return { async get({ topic, topics = [], city, latitude, longitude, queries = [], standing = false, fresh = false, articleUrls } = {}) {
+  return { async get({ topic, topics = [], city, lang, latitude, longitude, queries = [], standing = false, fresh = false, articleUrls } = {}) {
     if (articleUrls !== undefined) {
       if (!Array.isArray(articleUrls) || articleUrls.length > 15) throw new Error('invalid-articles');
       articleUrls.forEach(articleUrl);
@@ -139,7 +139,7 @@ export function createBriefing({ dataDir, fetcher = fetch, now = Date.now, readA
       return (await cached(key,fresh ? 0 : 60*60_000,async()=>parseSearchFeed(await download('https://www.bing.com/news/search?format=rss&qft=interval%3D%227%22&setlang=en-US&q='+encodeURIComponent(item.query),fetcher),undefined,now()))).map(s=>structureNews({...s,role:clean(item.role,60),query:item.query,topic:item.topic,tags:item.tags}));
     }));
     let weather = [];
-    if (hasLocation(latitude, longitude) || typeof city === 'string' && city.trim() && city.length <= 80) weather = await cached('weather3-' + Buffer.from(city || `${latitude},${longitude}`).toString('hex'), 60 * 60_000, async () => {
+    if (hasLocation(latitude, longitude) || typeof city === 'string' && city.trim() && city.length <= 80) weather = await cached('weather4-' + (lang === 'en' ? 'en-' : '') + Buffer.from(city || `${latitude},${longitude}`).toString('hex'), 60 * 60_000, async () => {
       const geo = city ? JSON.parse(await download('https://geocoding-api.open-meteo.com/v1/search?count=1&language=tr&name=' + encodeURIComponent(city), fetcher)) : { results: [{ latitude, longitude, name: 'Yakın çevreniz' }] };
       const place = geo.results?.[0];
       if (!place || !Number.isFinite(place.latitude) || !Number.isFinite(place.longitude)) return [];
@@ -147,7 +147,7 @@ export function createBriefing({ dataDir, fetcher = fetch, now = Date.now, readA
       let where = { city: clean(place.name, 60), region: clean(place.admin1, 60), country: clean(place.country, 60) };
       if (!city) {
         try {
-          const r = JSON.parse(await download(`https://api-bdc.io/data/reverse-geocode-client?latitude=${place.latitude}&longitude=${place.longitude}&localityLanguage=tr`, fetcher));
+          const r = JSON.parse(await download(`https://api-bdc.io/data/reverse-geocode-client?latitude=${place.latitude}&longitude=${place.longitude}&localityLanguage=${lang === 'en' ? 'en' : 'tr'}`, fetcher));
           where = { city: clean(r.city || r.locality, 60) || where.city, region: clean(r.principalSubdivision, 60), country: clean(r.countryName, 60) };
         } catch { /* generic name */ }
       }

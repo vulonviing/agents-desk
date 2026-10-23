@@ -24,7 +24,7 @@
   // { configured, weather } with a Turkish description of the conditions
   async function weatherInfo() {
     try {
-      const r = await getJson('/api/weather');
+      const r = await getJson('/api/weather?lang=' + I.lang);
       return { configured: !!r.configured, weather: r.weather ?? null };
     } catch { return { configured: false, weather: null }; }
   }
