@@ -15,7 +15,7 @@ dialogues written by Gemini Flash. Everything is deliberately minimal: more of t
 
 ## Layout of the code
 
-- `README.md` — overview, animation tree, run instructions; `docs/img/` — screenshots.
+- `README.md` — overview, animation tree, run instructions; `docs/img/` — screenshots; `docs/animations.md` — animation inventory (update it when animations change).
 - `server/server.js` — HTTP + SSE; `server/chat.js`, `llm.js`, `claude.js`, `resume.js` — coordinator chat and CLI sessions.
 - `server/dialogues.js`, `dialogue-creator.js`, `antigravity.js`, `briefing*.js`, `news-*.js` — news, dialogue pools, Flash refills, LED board.
 - `office/public/js/i18n.js` (TR/EN), `screens.js` (monitor scenes: Excel, X, Instagram, VS Code, Claude, Codex, sports …),

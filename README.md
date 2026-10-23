@@ -85,6 +85,8 @@ Office
 └── Cork board: weather card, CLI pin flight, tap glow on refresh and usage
 ```
 
+Full, code-derived inventory (files, timings, state machines, how to add one): [`docs/animations.md`](docs/animations.md).
+
 ## Run
 
 ```sh
@@ -106,6 +108,7 @@ open http://127.0.0.1:4317
 | `app/monitor/` | macOS external-monitor companion (Swift) |
 | `test/` | `node:test` suites |
 | `data/` | Runtime state (git-ignored) |
+| `docs/` | `animations.md` (animation inventory), `img/` (screenshots) |
 | `AGENTS.md` | Binding rules for agents working in this repo |
 
 ## Safety
