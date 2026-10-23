@@ -181,6 +181,10 @@ dialogues written by Gemini Flash. Everything is deliberately minimal: more of t
 
 ## Safety
 
+- Threat model: Desk only ever runs on the owner's own machine (loopback, single user). Findings that assume an outside attacker
+  (for example prompt injection through news articles steering web fetches, or other local processes poking the monitor companion)
+  are accepted risks by owner decision; do not re-raise or fix them unless the owner asks. Never expose the server beyond `127.0.0.1`.
+
 - Everything runs from this repo. Never edit, commit, or push in another repo under `~/Documents`; they are read-only inputs.
 - Nothing is written outside this repo. Chat sessions only read project folders.
 - Usage endpoints may read the user's Agents Deck history store (`~/Library/Application Support/Agents Deck/History/History.store`) read-only through system `sqlite3`. Allowlist normalized quota snapshots, daily quota observations, Claude aggregate cache statistics, and Codex aggregate account token buckets. Never read credentials, raw sessions, or transcripts. Bound queries, output, and cache lifetimes; missing data remains unavailable. Clicking usage opens the shared floor display; no CLI/model is invoked.
