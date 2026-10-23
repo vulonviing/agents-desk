@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { join } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { createNewsFeedback } from '../server/news-feedback.js';
+import { structureNews } from '../server/news-taxonomy.js';
 import { createDeskServer } from '../server/server.js';
 import { tmp } from './helpers.js';
 
@@ -75,4 +78,50 @@ test('a coordinator chat keeps one resumable session; resume gives the paste-abl
 test('there is no Master: its chat and resume endpoints do not exist', async (t) => {
   const { call } = await start(t);
   assert.equal((await call('POST', '/api/agents/manager%3Amaster/chat', { message: 'x', provider: 'claude' })).status, 404);
+});
+
+test('news publishing validates edition and origin; the news coordinator can open a read-only chat', async t => {
+  const server = createDeskServer({ dataDir: tmp(), loadConfig: () => ({ dialogues: { enabled: false }, desks: [{ id: 'news', name: 'Haber Masası', kind: 'news', coordinator: 'Bora', path: '.' }] }) });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const state = await (await fetch(url + '/api/news/session')).json();
+  assert.equal(state.intervalMs, 3_600_000);
+  const refreshed = await fetch(url + '/api/news/session/refresh', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(refreshed.status, 202);
+  const paused = await refreshed.json();
+  assert.equal(paused.status, 'stopped');
+  assert.equal(paused.progress.percent, 0);
+  assert.equal(paused.canRefresh, false);
+  assert.equal((await fetch(url + '/api/news/session/refresh', { method: 'POST', headers: { origin: 'https://evil.example', 'content-type': 'application/json' }, body: '{}' })).status, 403);
+  assert.equal((await fetch(url + '/api/news/session/refresh', { method: 'POST', body: '{}' })).status, 415);
+
+  assert.equal((await fetch(url + '/api/news/session/publish', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 409);
+  assert.equal((await fetch(url + '/api/news/session/publish', { method: 'POST', headers: { origin: 'https://evil.example', 'content-type': 'application/json' }, body: '{}' })).status, 403);
+  assert.equal((await fetch(url + '/api/agents/news%23project/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: 'hi', articleId: 'unknown', provider: 'claude' }) })).status, 404);
+});
+
+
+test('news chat binds server-owned article evidence, switches articles in the same CLI, and persists no bodies', async t => {
+ const dir=tmp(), log=join(dir,'fake.jsonl');
+ Object.assign(process.env,{DESK_CLAUDE_BIN:FAKE,DESK_FAKE_LOG:log});
+ t.after(()=>{delete process.env.DESK_CLAUDE_BIN;delete process.env.DESK_FAKE_LOG;});
+ const articles=['deepinfer','php-security'].map((key,i)=>structureNews({id:key,kind:'news',title:i?'PHP security update':'DeepSeek DeepInfer',url:`https://example.com/${key}`,publisher:'Example',publishedAt:Date.now(),expiresAt:Date.now()+3600000}));
+ createNewsFeedback({dataDir:dir}).register(articles);
+ let reads=0;
+ const server=createDeskServer({dataDir:dir,briefing:async (_dir,args)=>{reads++;return {details:args.articleUrls.map(url=>({url,text:'EPHEMERAL_ARTICLE_EVIDENCE '+url}))};},loadConfig:()=>({dialogues:{enabled:false},desks:[{id:'news',kind:'news',name:'News Desk',coordinator:'Bora',path:dir}]})});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
+ const base=`http://127.0.0.1:${server.address().port}/api/agents/news%23project`;
+ const post=body=>fetch(base+'/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+ const first=await post({message:'Explain this framework.',provider:'claude',articleId:articles[0].articleId,articleText:'FORGED_CONTENT'});assert.equal(first.status,200);
+ await post({message:'More detail?',provider:'claude',articleId:articles[0].articleId});assert.equal(reads,1);
+ await post({message:'And this update?',provider:'claude',articleId:articles[1].articleId});assert.equal(reads,2);
+ const calls=readFileSync(log,'utf8').trim().split('\n').map(JSON.parse);
+ assert.equal(calls.length,3);assert.ok(calls[1].args.includes('--resume'));assert.ok(calls[2].args.includes('chat-session-1'));
+ const prompt=c=>c.args[c.args.indexOf('--append-system-prompt')+1];
+ assert.match(prompt(calls[0]),/Bora/);assert.match(prompt(calls[0]),/EPHEMERAL_ARTICLE_EVIDENCE/);assert.ok(!prompt(calls[0]).includes('FORGED_CONTENT'));
+ assert.match(prompt(calls[2]),/PHP security update/);assert.ok(!prompt(calls[2]).includes('DeepSeek DeepInfer'));
+ assert.ok(!readFileSync(join(dir,'chat-sessions.json'),'utf8').includes('EPHEMERAL'));
+ assert.equal((await post({message:'Unknown',provider:'claude',articleId:'unknown'})).status,404);
+ const resume=await(await fetch(base+'/resume?provider=claude')).json();assert.match(resume.command,/claude --resume chat-session-1/);
 });

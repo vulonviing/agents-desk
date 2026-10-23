@@ -8,6 +8,7 @@
 
   const state = {
     provider: (() => { try { return localStorage.getItem('desk-cli') === 'codex' ? 'codex' : 'claude'; } catch { return 'claude'; } })(),
+    article: null,
     agent: null, // { id, name, deskName, kind }
     messages: {}, busy: {}, terminal: [], showCli: false, terminalError: '', resume: 'idle',
   };
@@ -26,7 +27,8 @@
     onChange();
     return true;
   }
-  async function open(agent) {
+  async function open(agent, article = null) {
+    state.article = agent.kind === 'news' ? article : null;
     state.agent = agent;
     state.showCli = false;
     state.resume = 'idle';
@@ -54,7 +56,7 @@
     state.busy[k] = true;
     render(); onChange();
     try {
-      const r = await postJson(url(id), { message: text, provider: state.provider, lang: I.lang });
+      const r = await postJson(url(id), { message: text, provider: state.provider, lang: I.lang, ...(state.agent?.kind === 'news' ? { articleId: state.article?.articleId ?? null } : {}) });
       state.messages[k] = r.messages;
     } catch (err) {
       state.messages[k] = [...(state.messages[k] ?? []), { role: 'error', text: err.message || I.t('chat.error'), at: new Date().toISOString() }];
@@ -132,6 +134,7 @@
         h('div.chat-head-actions', h('span.pill' + (busy ? '.working' : ''), busy ? I.t('chat.replying') : I.t('chat.ready')),
           messages.some((m) => m.role === 'assistant') ? h('button', { type: 'button', onclick: copyResume, title: I.t('chat.resume.title') }, resumeLabel) : null,
           h('button', { type: 'button', 'aria-pressed': String(state.showCli), onclick: () => { state.showCli = !state.showCli; render(); if (state.showCli) void loadTerminal(); } }, state.showCli ? I.t('chat.chat') : I.t('chat.cli')))),
+      ...(state.article ? [h('div.news-chat-context', h('small', I.t('news.context')), h('strong', I.title(state.article)), h('a', { href: state.article.url, target: '_blank', rel: 'noopener noreferrer' }, state.article.publisher), h('p', I.explanation(state.article) ?? ''))] : []),
       log,
       h('div.chat-input', area,
         h('div.chat-actions',

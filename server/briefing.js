@@ -3,6 +3,7 @@ import { readFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { structureNews } from './news-taxonomy.js';
+import { createArticleReader, articleUrl } from './briefing-article.js';
 // Public feeds by topic. Every feed names the hosts its links may point to; nothing else is ever followed.
 const BBC = ['www.bbc.com', 'www.bbc.co.uk', 'bbc.com', 'bbc.co.uk'];
 export const FEEDS = {
@@ -29,24 +30,29 @@ export const feedsOf = (topic) => [FEEDS[topic], ...(FEEDS[topic].extra ?? [])].
 
 // Always-on public searches (cached and shared by every office): the news we must never miss. Flash adds role-specific ones.
 export const STANDING_QUERIES = [
-  { role: 'genel', query: 'OpenAI new GPT model release' },
-  { role: 'genel', query: 'Google Gemini new model release' },
-  { role: 'genel', query: 'Anthropic Claude new model release' },
-  { role: 'genel', query: 'xAI Grok new model' },
-  { role: 'genel', query: 'Elon Musk flying car' },
-  { role: 'genel', query: 'AfD poll Germany' },
-  { role: 'genel', query: 'Merz government coalition' },
-  { role: 'genel', query: 'Erdogan Turkey politics' },
+  { role: 'genel', topic: 'technology', query: 'critical security vulnerability actively exploited PHP software update' },
+  { role: 'genel', topic: 'ai', query: 'artificial intelligence biggest news today' },
+  { role: 'genel', topic: 'ai', query: 'OpenAI GPT new model release' },
+  { role: 'genel', topic: 'ai', query: 'Google Gemini new model release' },
+  { role: 'genel', topic: 'ai', query: 'Anthropic Claude new model release' },
+  { role: 'genel', topic: 'ai', query: 'AI agents coding tools research news' },
+  { role: 'genel', topic: 'ai', query: 'artificial intelligence regulation business news' },
+  { role: 'genel', topic: 'germany', query: 'Deutschland Politik aktuelle Nachrichten Bundesregierung Bundestag' },
+  { role: 'genel', topic: 'germany', query: 'Germany politics government coalition election news' },
+  { role: 'genel', topic: 'germany', query: 'Merz AfD Bundestag Politik heute' },
+  { role: 'genel', topic: 'turkey', query: 'Türkiye siyaset son dakika meclis hükümet muhalefet' },
+  { role: 'genel', topic: 'turkey', query: 'Turkey politics government opposition parliament news' },
+  { role: 'genel', topic: 'turkey', query: 'Erdoğan CHP TBMM siyaset bugün' },
 ];
-const clean = (value, max = 160) => String(value ?? '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]*>/g, '').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&lt;|&gt;/g, '').replace(/\s+/g,' ').trim().slice(0,max);
+const clean = (value, max = 160) => String(value ?? '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]*>/g, '').replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (_, code) => { const value = code[0].toLowerCase() === 'x' ? parseInt(code.slice(1), 16) : Number(code); return value > 0 && value <= 0x10ffff ? String.fromCodePoint(value) : ''; }).replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&lt;|&gt;/g, '').replace(/\s+/g,' ').trim().slice(0,max);
 export function parseFeed(xml, topic, now = Date.now(), source = feedsOf(topic)[0]) {
   return [...xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/g)].flatMap(([_, body], i) => {
     const tag = name => body.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`))?.[1];
     const title = clean(tag('title'), 150), url = clean(tag('link'), 300), publishedAt = Date.parse(tag('pubDate') ?? tag('dc:date') ?? '');
     if (!title || !Number.isFinite(publishedAt) || publishedAt > now + 300_000 || now - publishedAt > 48 * 3_600_000) return [];
     try { const u = new URL(url); if (u.protocol !== 'https:' || u.username || u.password || !source.hosts.includes(u.hostname)) return []; } catch { return []; }
-    return [{ id: `${topic}:${createHash('sha256').update(url).digest('hex').slice(0, 10)}:${i}`, kind: 'news', topic, publisher: source.name, title, description: clean(tag('description'), 400), url, publishedAt, expiresAt: Math.min(publishedAt + 48 * 3_600_000, now + 6 * 3_600_000) }];
-  }).slice(0, 4);
+    return [{ id: `${topic}:${createHash('sha256').update(url).digest('hex').slice(0, 10)}:${i}`, kind: 'news', topic, publisher: source.name, discovery: [{ kind: 'feed', rank: i + 1 }], title, description: clean(tag('description'), 400), url, publishedAt, expiresAt: Math.min(publishedAt + 48 * 3_600_000, now + 6 * 3_600_000) }];
+  }).slice(0, 12);
 }
 
 /** Search results are links only: fetches remain restricted to the Bing RSS endpoint. */
@@ -61,8 +67,8 @@ export function parseSearchFeed(xml, role, now = Date.now()) {
       if(u.protocol!=='https:'||u.username||u.password||!u.hostname.includes('.')||/[\[\]:]/.test(u.hostname)||/^\d+\.\d+\.\d+\.\d+$/.test(u.hostname)||/\.(local|internal|localhost)$/.test(u.hostname))return [];
       url=u.href;
     }catch{return [];}
-    return [{id:'search:'+createHash('sha256').update(url).digest('hex').slice(0,16),kind:'news',publisher:clean(tag('News:Source'),60)||'Bing News',title,description:clean(tag('description'),400),url,publishedAt,expiresAt:Math.min(publishedAt+48*3600000,now+6*3600000),role}];
-  }).slice(0,3);
+    return [{id:'search:'+createHash('sha256').update(url).digest('hex').slice(0,16),kind:'news',publisher:clean(tag('News:Source'),60)||new URL(url).hostname,discovery:[{kind:'search',rank:i+1}],title,description:clean(tag('description'),400),url,publishedAt,expiresAt:Math.min(publishedAt+48*3600000,now+6*3600000),role}];
+  }).slice(0,8);
 }
 
 async function download(url, fetcher) {
@@ -74,7 +80,7 @@ async function download(url, fetcher) {
   finally { await reader.cancel().catch(() => {}); }
   return text;
 }
-export function createBriefing({ dataDir, fetcher = fetch, now = Date.now }) {
+export function createBriefing({ dataDir, fetcher = fetch, now = Date.now, readArticle = createArticleReader() }) {
   const dir = join(dataDir, 'briefings'); const pending = new Map();
   async function cached(key, ttl, produce) {
     const path = join(dir, key + '.json');
@@ -90,18 +96,47 @@ export function createBriefing({ dataDir, fetcher = fetch, now = Date.now }) {
     pending.set(key, promise); return promise;
   }
   const hasLocation = (latitude, longitude) => Number.isFinite(latitude) && Number.isFinite(longitude) && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180;
-  return { async get({ topic, topics = [], city, latitude, longitude, queries = [], standing = false } = {}) {
+  return { async get({ topic, topics = [], city, latitude, longitude, queries = [], standing = false, fresh = false, articleUrls } = {}) {
+    if (articleUrls !== undefined) {
+      if (!Array.isArray(articleUrls) || articleUrls.length > 15) throw new Error('invalid-articles');
+      articleUrls.forEach(articleUrl);
+      const details = await Promise.all([...new Set(articleUrls)].map(async url => {
+        try { const value = await readArticle(url); const text = typeof value.text === 'string' ? value.text.slice(0, 16000) : '';
+          return { url, text, available: !!text }; }
+        catch { return { url, text: '', available: false }; }
+      }));
+      return { at: now(), sources: [], details };
+    }
     const wanted = [...new Set([...(topic ? [topic] : []), ...(Array.isArray(topics) ? topics : [])])].slice(0, 5);
     if (!wanted.length) wanted.push('technology');
     if (wanted.some((t) => !Object.hasOwn(FEEDS, t))) throw new Error('invalid-topic');
     // one cache entry per feed: a failing feed costs nothing else
-    const perFeed = await Promise.all(wanted.flatMap((t) => feedsOf(t).map((f) => cached(`feed-${createHash('sha256').update(f.url).digest('hex').slice(0, 16)}`, 60 * 60_000, async () => parseFeed(await download(f.url, fetcher), t, now(), f)))));
+    const perFeed = await Promise.all(wanted.flatMap((t) => feedsOf(t).map((f) => cached(`feed-${createHash('sha256').update(f.url).digest('hex').slice(0, 16)}`, fresh ? 0 : 60 * 60_000, async () => parseFeed(await download(f.url, fetcher), t, now(), f)))));
     const sources = perFeed.flat();
-    const all = [...(Array.isArray(queries) ? queries : []), ...(standing ? STANDING_QUERIES : [])].slice(0, 18);
+    // Public community ranking and votes are real signals; they are not readership counts.
+    if (wanted.includes('ai')) sources.push(...await cached('hn-top-v1', fresh ? 0 : 60 * 60_000, async () => {
+      const ids = JSON.parse(await download('https://hacker-news.firebaseio.com/v0/topstories.json', fetcher));
+      if (!Array.isArray(ids)) return [];
+      return (await Promise.all(ids.slice(0, 50).map(async (id, i) => {
+        if (!Number.isSafeInteger(id) || id < 1) return null;
+        try {
+          const a = JSON.parse(await download(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, fetcher));
+          if (a.type !== 'story' || a.dead || a.deleted || !Number.isFinite(a.time) || !Number.isFinite(a.score)) return null;
+          const publishedAt = a.time * 1000;
+          if (publishedAt > now() + 300_000 || now() - publishedAt > 48 * 3_600_000) return null;
+          const item = structureNews({ id: `hn:${id}`, kind: 'news', topic: 'ai', title: clean(a.title), url: a.url,
+            publisher: typeof a.url === 'string' ? new URL(a.url).hostname : '', publishedAt,
+            expiresAt: Math.min(publishedAt + 48 * 3_600_000, now() + 6 * 3_600_000),
+            discovery: [{ kind: 'community-ranking', source: 'Hacker News', rank: i + 1, votes: Math.max(0, a.score) }] });
+          return item;
+        } catch { return null; }
+      }))).filter(Boolean);
+    }));
+    const all = [...(standing ? STANDING_QUERIES : []), ...(Array.isArray(queries) ? queries : [])].slice(0, 24);
     const searches=await Promise.all(all.map(async item=>{
       if(typeof item?.query!=='string'||item.query.length>100||!/^[\p{L}\p{N} '\-]+$/u.test(item.query))return [];
       const key='search-'+createHash('sha256').update(item.query).digest('hex').slice(0,24);
-      return (await cached(key,6*3600000,async()=>parseSearchFeed(await download('https://www.bing.com/news/search?format=rss&qft=interval%3D%227%22&setlang=en-US&q='+encodeURIComponent(item.query),fetcher),undefined,now()))).map(s=>structureNews({...s,role:clean(item.role,60),query:item.query,topic:item.topic,tags:item.tags}));
+      return (await cached(key,fresh ? 0 : 60*60_000,async()=>parseSearchFeed(await download('https://www.bing.com/news/search?format=rss&qft=interval%3D%227%22&setlang=en-US&q='+encodeURIComponent(item.query),fetcher),undefined,now()))).map(s=>structureNews({...s,role:clean(item.role,60),query:item.query,topic:item.topic,tags:item.tags}));
     }));
     let weather = [];
     if (hasLocation(latitude, longitude) || typeof city === 'string' && city.trim() && city.length <= 80) weather = await cached('weather3-' + Buffer.from(city || `${latitude},${longitude}`).toString('hex'), 60 * 60_000, async () => {

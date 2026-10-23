@@ -34,6 +34,8 @@ test('createUsage reads rows through the injected runner, caches briefly and deg
   t += 30_000;
   await u.read();
   assert.equal(calls, 2);
+  await u.read({ fresh: true });
+  assert.equal(calls, 3);
   const broken = createUsage({ store, run: async () => { throw new Error('locked'); } });
   assert.deepEqual(await broken.read(), { available: false, providers: {} });
   assert.deepEqual(await createUsage({ store: join(tmpdir(), 'missing.store') }).read(), { available: false, providers: {} });

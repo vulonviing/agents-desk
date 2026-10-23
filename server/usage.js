@@ -37,8 +37,8 @@ const defaultRun = (store) => new Promise((resolve, reject) => {
 export function createUsage({ store = STORE, run = defaultRun, now = Date.now } = {}) {
   let memo = { at: 0, value: null };
   return {
-    async read() {
-      if (memo.value && now() - memo.at < TTL_MS) return memo.value;
+    async read({ fresh = false } = {}) {
+      if (!fresh && memo.value && now() - memo.at < TTL_MS) return memo.value;
       let value = { available: false, providers: {} };
       try {
         if (existsSync(store)) {

@@ -72,17 +72,28 @@
   }
 
   class Life {
-    constructor(view, { floorId = 'growth', onConversation = () => {}, onNews = () => {} } = {}) {
+    constructor(view, { floorId = 'growth', onConversation = () => {}, onConversationUpdate = () => {}, onScreenPower = () => {}, onNews = () => {} } = {}) {
       this.view = view;
       this.floor = `floor:${floorId}`;
       this.pools = new Pools();
       this.onConversation = onConversation;
+      this.onConversationUpdate = onConversationUpdate;
       this.onNews = onNews;
+      this.onScreenPower = onScreenPower;
+      this.screenPower = null;
       this.nextAt = 0;
       this.busy = 0;
       this.history = [];
       this.seq = 0;
       this.timer = null;
+      this.newsSession = { status: 'idle' };
+      this.delivery = null;
+      this.publishRequest = false;
+      this.floorLedAt = 0;
+      this.floorLedVisits = 0;
+      this.workflow = new window.OfficeWorkflow.Workflow(this);
+      this.kitchen=window.OfficeKitchen?new window.OfficeKitchen.Kitchen(this):null;
+      this.fireplace=window.OfficeHearth?new window.OfficeHearth.Hearth(this):null;
     }
     start() {
       this.stop();
@@ -98,10 +109,11 @@
     // agents that may leave their desk: idle, nobody talking to them, no open chat
     free() {
       const v = this.view;
-      return v.agents.filter((a) => !v.isAway(a.id) && !v.pinned.has(a.id) && v.st[a.id]?.status === 'idle' && !v.talkedTo(a.id) && !v.speaking(a.id));
+      return v.agents.filter((a) => !this.fireplace?.reserved(a.id) && this.delivery?.id !== a.id && !this.kitchen?.reserved(a.id) && !v.isAway(a.id) && !v.pinned.has(a.id) && v.st[a.id]?.status === 'idle' && !v.talkedTo(a.id) && !v.speaking(a.id));
     }
     // Washing up: when the pile reaches the limit a free sim walks over and clears the counter dish by dish.
     clean(free) {
+      if(this.kitchen)return this.kitchen.startClean(free);
       const v = this.view;
       if (this.cleaning || v.dishes.length < window.OfficeLayout.DISH_LIMIT) return false;
       const a = this.random(free);
@@ -110,18 +122,95 @@
       if (!ok) { this.busy--; this.cleaning = false; }
       return ok;
     }
+    requestScreenPower(on) {
+      this.screenPower ??= { on: !!on, id: null };
+      this.screenPower.on = !!on;
+      this.view.floorPowerPending = !!on;
+      this.fireplace?.dismiss();
+      this.startScreenPower();
+    }
+    cancelScreenPower() {
+      if (this.screenPower?.id) this.view.release(this.screenPower.id);
+      this.screenPower = null; this.view.floorPowerPending = null;this.view.floorPowerJump=null;
+    }
+    startScreenPower() {
+      const request = this.screenPower, v = this.view;
+      if (!request || request.id || request.stage==='signal') return;
+      if(!request.catTried){request.catTried=true;if(window.OfficeCat?.tryControl(v,{kind:'power',on:request.on})){request.id='leya';return;}}
+      const agent = this.free()[0]; if (!agent) return;
+      const pad = window.OfficeLayout.FLOOR_POWER_PADS[request.on?'on':'off'];
+      if (v.walkTo(agent.id, { x: pad.x + pad.w/2 - 12, y: pad.y + pad.h }, { hold: true, pose: 'stand', kind: 'screen-power', act: { type: 'screen-power' } })) {
+        request.id = agent.id; this.busy++;
+      }
+    }
+    onCatControl(action){
+      const v=this.view;
+      if(action.kind==='power'){
+        if(this.screenPower?.id!=='leya')return;
+        if(action.on){this.screenPower={on:true,id:null,stage:'signal',at:v.t};v.pulseFloor();v.schedule(window.OfficeLayout.FLOOR_SIGNAL.travel,{type:'screen-power-arrived',at:v.t});}
+        else{this.screenPower=null;v.floorPowerPending=null;this.onScreenPower(false);}
+      }else if(action.kind==='cli')v.cli=action.to;
+      else if(action.kind==='lang')I.set(action.to);
+      else if(action.kind==='loc')v.locOn=action.to;
+      else if(action.kind==='display')v.setDisplayMode(action.to);
+      else if(['refresh','usage'].includes(action.kind))v.applyBoardAction(action.kind,action.to);
+    }
     tick() {
       const v = this.view;
+      if (this.fireplace?.tick()) return;
+      this.startScreenPower();
+      this.workflow.tick();
+      if (!document.hidden) {
+        if (this.delivery?.stage === 'publishing') void this.publishEdition();
+        else if (!this.delivery && this.newsSession.status === 'ready') this.deliverEdition();
+      }
       if (document.hidden || !v.agents.length || v.t < this.nextAt || this.busy >= 2) return;
       const free = this.free();
       if (!free.length) return;
       if (this.clean(free)) { this.nextAt = v.t + 10; return; }
-      const kinds = ['visit', 'visit', 'window', 'window', 'coffee', 'water', 'fridge', 'news', 'desk'];
+      const kinds = ['visit', 'visit', 'window', 'window', 'coffee', 'water', 'fridge', 'news', 'floorLed', 'desk'];
       for (let tries = 0; tries < 4; tries++) {
         const kind = kinds[Math.floor(Math.random() * kinds.length)];
         if (this[kind] && this[kind](free)) { this.nextAt = v.t + START_GAP_S; return; }
       }
     }
+    setNewsSession(session) { this.newsSession = session; this.view.newsSession = session; }
+    deliverEdition() {
+      const v = this.view;
+      const a = this.free().find(a => a.kind === 'news');
+      if (!a) return false;
+      this.delivery = { id: a.id, edition: this.newsSession.edition, stage: 'pickup', at: v.t };
+      v.newsDelivery = this.delivery;
+      v.say(a.id, I.t('edition.pickup'), { duration: 3 });
+      v.schedule(1.8, { type: 'news-carry', edition: this.delivery.edition });
+      return true;
+    }
+    finishDelivery() {
+      if (this.delivery) this.view.release(this.delivery.id);
+      this.delivery = null; this.view.newsDelivery = null;
+    }
+    async publishEdition() {
+      const d = this.delivery;
+      if (!d || this.publishRequest) return;
+      this.publishRequest = true;
+      try {
+        const result = await window.OfficeApi.postJson('/api/news/session/publish', { edition: d.edition });
+        this.setNewsSession(result);
+        if (this.delivery === d) {
+          this.view.say(d.id, I.t('edition.loaded'), { duration: 3 });
+          this.view.led.index = 0; this.view.led.at = this.view.led.flip = this.view.t;
+          this.finishDelivery();
+        }
+      } catch {
+        // A stale disk (another tab published it) is discarded; network failures retry without model calls.
+        try {
+          const state = await window.OfficeApi.getJson('/api/news/session');
+          this.setNewsSession(state);
+          if (this.delivery === d && (state.status !== 'ready' || state.edition !== d.edition)) this.finishDelivery();
+        } catch { /* offline: keep the disk and retry */ }
+      } finally { this.publishRequest = false; }
+    }
+
     random(list) { return list[Math.floor(Math.random() * list.length)]; }
 
     // ---- activities (each returns true when it started) ----
@@ -143,6 +232,10 @@
       return true;
     }
     record(rid) { return this.history.find((r) => r.id === rid); }
+    finishConversation(rid) {
+      const record = this.record(rid);
+      if (record?.active) { record.active = false; this.onConversationUpdate(record); }
+    }
     speak(rid, i) {
       const v = this.view;
       const rec = this.record(rid);
@@ -150,11 +243,12 @@
       const A = v.byId[rec.a], B = v.byId[rec.b];
       const cur = v.walkerOf(rec.a);
       // the host sat down busy, or somebody opened a chat: end politely
-      if (!A || !B || !cur || i >= rec.lines.length || v.pinned.has(rec.a) || v.pinned.has(rec.b) || v.st[rec.b]?.status !== 'idle') { v.release(rec.a); return; }
+      if (!rec.active || !A || !B || !cur || cur.phase === 'back' || i >= rec.lines.length || v.pinned.has(rec.a) || v.pinned.has(rec.b) || v.st[rec.b]?.status !== 'idle') { this.finishConversation(rid); v.release(rec.a); return; }
       const speaker = i % 2 === 0 ? rec.a : rec.b;
       const text = rec.lines[i];
       const dur = turnDuration(text);
       rec.turns.push({ speakerId: speaker, text });
+      this.onConversationUpdate(rec);
       v.say(speaker, text, { duration: dur * 1.6, thread: rec.id, source: rec.source, act: { type: 'talk', rid: rec.id } });
       v.schedule(dur, { type: 'speak', rid, i: i + 1 });
     }
@@ -175,7 +269,23 @@
     onWalk(id, evt, act) {
       const v = this.view;
       if (!act) return;
-      if (act.type === 'visit') { if (evt === 'arrive') this.speak(act.rid, 0); else { this.busy--; const r = this.record(act.rid); if (r) r.active = false; } }
+      if(act.type==='hearth'){this.fireplace?.onWalk(id,evt);return;}
+      if(act.type==='kitchen-walk'){this.kitchen?.onWalk(id,evt,act);return;}
+      if (act.type === 'screen-power') {
+        if (evt === 'arrive' && this.screenPower?.id === id) {
+          const on=this.screenPower.on;this.screenPower.stage='jump';
+          v.floorPowerJump={id,at:v.t,on};
+          v.say(id,I.t(on?'apps.switchOnLine':'apps.switchOffLine'),{duration:2.5});
+          v.schedule(1,{type:'screen-power-land',id,on});
+          v.schedule(2,{type:'screen-power-release',id});
+        } else if(evt!=='arrive') {this.busy=Math.max(0,this.busy-1);if(this.screenPower?.id===id){this.screenPower.id=null;}}
+      } else if (act.type === 'news-delivery') {
+        if (evt === 'arrive' && this.delivery?.edition === act.edition && this.delivery.stage === 'carry') {
+          this.delivery.stage = 'insert'; this.delivery.at = v.t;
+          v.say(id, I.t('edition.insert'), { duration: 3 });
+          v.schedule(2.2, { type: 'news-publish', edition: act.edition });
+        }
+      } else if (act.type === 'visit') { if (evt === 'arrive') this.speak(act.rid, 0); else { this.busy--; this.finishConversation(act.rid); } }
       else if (act.type === 'solo') {
         if (evt === 'arrive') {
           if (act.fx) v.fx[act.fx] = { t0: v.t, night: v.darkness() >= 0.3 };
@@ -191,7 +301,17 @@
     }
     onSched(act) {
       const v = this.view;
-      if (act.type === 'speak') this.speak(act.rid, act.i);
+      if(act.type==='kitchen-step'){this.kitchen?.onSched(act);return;}
+      if(act.type==='screen-power-arrived'){if(this.screenPower?.stage==='signal'&&this.screenPower.at===act.at){this.screenPower=null;v.floorPowerPending=null;this.onScreenPower(true);}return;}
+      if(act.type==='screen-power-land'){if(this.screenPower?.id===act.id){if(v.pinned.has(act.id)||v.walkerOf(act.id)?.phase!=='stay'){this.screenPower.id=null;v.floorPowerJump=null;v.release(act.id);return;}if(act.on){this.screenPower={on:true,id:null,stage:'signal',at:v.t};v.pulseFloor();v.schedule(window.OfficeLayout.FLOOR_SIGNAL.travel,{type:'screen-power-arrived',at:v.t});}else{this.screenPower=null;v.floorPowerPending=null;this.onScreenPower(false);}}return;}
+      if(act.type==='screen-power-release'){if(v.floorPowerJump?.id===act.id)v.floorPowerJump=null;v.release(act.id);return;}
+      if (act.type === 'news-carry' && this.delivery?.edition === act.edition) {
+        const d = this.delivery;
+        d.stage = 'carry'; d.at = v.t;
+        if (!v.walkTo(d.id, window.OfficeLayout.SPOTS.led, { hold: true, pose: 'back', kind: 'news-delivery', act: { type: 'news-delivery', edition: d.edition } })) this.finishDelivery();
+      } else if (act.type === 'news-publish' && this.delivery?.edition === act.edition) {
+        this.delivery.stage = 'publishing'; void this.publishEdition();
+      } else if (act.type === 'speak') this.speak(act.rid, act.i);
       else if (act.type === 'wash') {
         if (!v.dishes.length || !v.walkerOf(act.id)) { v.release(act.id); return; }
         v.removeDish(); if (window.OfficeSfx?.glug) window.OfficeSfx.glug();
@@ -202,17 +322,28 @@
       if (act.type === 'talk') { const r = this.record(act.rid); if (r) this.onConversation(r); }
       else if (act.type === 'news') this.onNews(act.source);
     }
-    snapshot() { return { busy: this.busy, cleaning: this.cleaning, nextAt: this.nextAt, seq: this.seq, history: this.history }; }
-    restore(s) { if (!s) return; this.busy = s.busy ?? 0; this.cleaning = !!s.cleaning; this.nextAt = s.nextAt ?? 0; this.seq = s.seq ?? 0; this.history = s.history ?? []; }
+    snapshot() { return { hearth:this.fireplace?.snapshot(), kitchen:this.kitchen?.snapshot(), screenPower: this.screenPower, workflow: this.workflow.snapshot(), spokenAt: [...this.pools.spokenAt].slice(-600), floorLedAt: this.floorLedAt, floorLedVisits: this.floorLedVisits, delivery: this.delivery, busy: this.busy, cleaning: this.cleaning, nextAt: this.nextAt, seq: this.seq, history: this.history }; }
+    restore(s) { if (!s) return; this.kitchen?.restore(s.kitchen);this.fireplace?.restore(s.hearth);this.screenPower=s.screenPower??null;this.view.floorPowerPending=this.screenPower?.on??null; this.workflow.restore(s.workflow); this.pools.spokenAt = new Map(s.spokenAt ?? []); this.floorLedAt = s.floorLedAt ?? 0; this.floorLedVisits = s.floorLedVisits ?? 0; this.delivery = s.delivery ?? null; this.view.newsDelivery = this.delivery; this.busy = s.busy ?? 0; this.cleaning = !!s.cleaning; this.nextAt = s.nextAt ?? 0; this.seq = s.seq ?? 0; this.history = s.history ?? []; }
     window(free) {
       const spots = window.OfficeLayout.SPOTS.windows;
       const i = Math.floor(Math.random() * spots.length);
       return this.solo(free, { kind: 'window', spot: spots[i], pose: 'back', stay: 6, fx: `window${i}` });
     }
-    coffee(free) { return this.solo(free, { kind: 'coffee', spot: window.OfficeLayout.SPOTS.coffee, pose: 'mug', stay: 5, fx: 'coffee', dish: 'mug' }); }
+    coffee(free) { if(this.kitchen)return this.kitchen.drink(free,'coffee');return this.solo(free, { kind: 'coffee', spot: window.OfficeLayout.SPOTS.coffee, pose: 'mug', stay: 5, fx: 'coffee', dish: 'mug' }); }
     fridge(free) { return this.solo(free, { kind: 'water', spot: window.OfficeLayout.SPOTS.fridge, pose: 'back', stay: 5, fx: 'fridge', dish: 'plate' }); }
-    water(free) { return this.solo(free, { kind: 'water', spot: window.OfficeLayout.SPOTS.cooler, pose: 'stand', stay: 4, fx: 'cooler', dish: 'glass' }); }
+    water(free) { if(this.kitchen)return this.kitchen.drink(free,'water');return this.solo(free, { kind: 'water', spot: window.OfficeLayout.SPOTS.cooler, pose: 'stand', stay: 4, fx: 'cooler', dish: 'glass' }); }
     news(free) { return this.solo(free, { kind: 'news', spot: window.OfficeLayout.SPOTS.led, pose: 'back', stay: 7, sourcedOnly: true }); }
+    floorLed(free) {
+      const v = this.view;
+      if (!free.length || v.t < this.floorLedAt) return false;
+      const a = this.random(free);
+      const text = I.t(`floorLed.comment${this.floorLedVisits % 4}`);
+      const ok = v.walkTo(a.id, window.OfficeLayout.SPOTS.floorLed, {
+        stay: 7, pose: 'back', kind: 'floor-led', act: { type: 'solo', text },
+      });
+      if (ok) { this.busy++; this.floorLedAt = v.t + 155; this.floorLedVisits++; }
+      return ok;
+    }
     desk(free) {
       const v = this.view;
       const a = this.random(free);

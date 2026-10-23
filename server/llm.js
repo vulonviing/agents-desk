@@ -138,7 +138,7 @@ const clip = (t, n) => String(t ?? '').slice(0, n);
 /** A real Codex turn in the project's own folder: read-only sandbox (it can read and search files and run read-only
  *  shell commands, never write or reach the network), the project's AGENTS.md/skills are visible, the thread persists
  *  so the next turn resumes it. Resolves with { reply, sessionId }. */
-export async function runCodexChat(prompt, text, { cwd, sessionId = null, persist = true, timeoutMs = 300_000, onEvent = () => {} } = {}) {
+export async function runCodexChat(prompt, text, { cwd, sessionId = null, persist = true, allowWeb = false, timeoutMs = 300_000, onEvent = () => {} } = {}) {
   if (sessionId && !/^[\da-f-]{36}$/i.test(sessionId)) throw new Error('Geçersiz CLI oturum kimliği.');
   const base = join(ROOT, 'data', 'cli');
   mkdirSync(base, { recursive: true });
@@ -148,14 +148,16 @@ export async function runCodexChat(prompt, text, { cwd, sessionId = null, persis
     const env = cleanEnv();
     for (const k of Object.keys(env)) if (/^(OPENAI_|AZURE_OPENAI_|CODEX_API_KEY$)/.test(k)) delete env[k];
     const catalogPath = join(dir, 'models.json');
-    writeFileSync(catalogPath, JSON.stringify(await catalogFor(bin, env)), { mode: 0o600 });
+    const catalog = await catalogFor(bin, env);
+    writeFileSync(catalogPath, JSON.stringify(allowWeb ? { ...catalog, models: catalog.models.map(m => ({ ...m, supports_search_tool: true })) } : catalog), { mode: 0o600 });
     const args = ['exec', '--ignore-user-config', ...(persist ? [] : ['--ephemeral']), '--sandbox', 'read-only', '--json',
       '-c', `model_catalog_json=${JSON.stringify(catalogPath)}`, '-c', 'approval_policy="never"', '-c', 'mcp_servers={}',
-      '-c', 'web_search="disabled"', '-c', 'model_reasoning_effort="medium"',
+      '-c', allowWeb ? 'web_search="live"' : 'web_search="disabled"', '-c', 'model_reasoning_effort="medium"',
+      ...(allowWeb ? ['--disable', 'shell_tool', '-c', 'project_doc_max_bytes=0'] : []),
       ...CODEX_CHAT_DISABLED.flatMap((f) => ['--disable', f])];
     if (sessionId) args.push('resume', sessionId);
     args.push('-');
-    onEvent({ kind: 'status', text: `codex exec ${sessionId ? 'resume ' : ''}· salt-okunur sandbox, ağ kapalı` });
+    onEvent({ kind: 'status', text: `codex exec ${sessionId ? 'resume ' : ''}· ${allowWeb ? 'web araştırması açık' : 'salt-okunur sandbox, ağ kapalı'}` });
     return await new Promise((resolve, reject) => {
       const child = spawn(/\.(mjs|js|cjs)$/.test(bin) ? process.execPath : bin, /\.(mjs|js|cjs)$/.test(bin) ? [bin, ...args] : args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
       let buffer = '', stderr = '', answer = '', thread = sessionId, size = 0, failed = false;
@@ -172,8 +174,9 @@ export async function runCodexChat(prompt, text, { cwd, sessionId = null, persis
             if (e.type === 'error' || e.type === 'turn.failed') { failed = true; stderr = e.message ?? e.error?.message ?? 'Codex hata verdi.'; }
             if (e.type === 'item.started' && e.item?.type === 'command_execution') onEvent({ kind: 'status', text: `komut: ${clip(e.item.command, 200)}` });
             if (e.type === 'item.completed' && e.item?.type === 'agent_message') answer = e.item.text;
+            if (e.type === 'item.started' && e.item?.type === 'web_search' && allowWeb) onEvent({ kind: 'status', text: 'Web kaynakları araştırılıyor…' });
             // the sandbox should prevent these; if one still shows up, end the turn
-            if (e.item && ['file_change', 'mcp_tool_call', 'web_search'].includes(e.item.type)) { failed = true; stderr = 'İzin verilmeyen araç isteği.'; child.kill('SIGTERM'); }
+            if (e.item && (['file_change', 'mcp_tool_call'].includes(e.item.type) || e.item.type === 'web_search' && !allowWeb || e.item.type === 'command_execution' && allowWeb)) { failed = true; stderr = 'İzin verilmeyen araç isteği.'; child.kill('SIGTERM'); }
           } catch { /* non-event diagnostic */ }
         }
       });

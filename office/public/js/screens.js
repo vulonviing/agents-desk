@@ -1,4 +1,4 @@
-// What the idle monitors show: a looping "playlist" of small pixel scenes (Excel, X, Instagram, Facebook, VS Code, Claude,
+// What the idle monitors show: independent random selections of small pixel scenes (Excel, X, Instagram, Facebook, VS Code, Claude,
 // Codex, Copilot, Antigravity, WhatsApp, Chrome, football, basketball, tennis). Every desk has its own order and timing,
 // so the room never looks synchronised. Scenes are drawn into a 20 x 11 pixel screen through P(x, y, w, h, colour).
 // Each scene also has a tint and a brightness: the lighting code uses them so the light falling out of a monitor
@@ -215,27 +215,58 @@
   };
   const ORDER = Object.keys(SCENES);
 
-  // per-desk playlist: a seeded shuffle with per-scene lengths, looping forever
-  const lists = new Map();
-  function listFor(seed) {
-    if (lists.has(seed)) return lists.get(seed);
-    const ids = [...ORDER];
-    for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(rnd(seed * 31 + i) * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
-    const slots = ids.map((id) => ({ id, len: SCENES[id].len * (0.8 + rnd(seed + id.length * 3) * 0.5) }));
-    const total = slots.reduce((n, x) => n + x.len, 0);
-    const list = { slots, total };
-    lists.set(seed, list);
-    return list;
+  // Each desk owns a random stream. Persisted RNG/history keep a refresh on the same scene.
+  const players = new Map();
+  const random = state => {
+    state.rng = (state.rng + 0x6d2b79f5) >>> 0;
+    let x = state.rng;
+    x = Math.imul(x ^ x >>> 15, x | 1);
+    x ^= x + Math.imul(x ^ x >>> 7, x | 61);
+    return ((x ^ x >>> 14) >>> 0) / 4294967296;
+  };
+  function next(state, at) {
+    const choices = ORDER.filter(id => !state.recent.includes(id));
+    state.id = choices[Math.floor(random(state) * choices.length)];
+    state.recent = [...state.recent, state.id].slice(-3);
+    state.at = at;
+    state.len = SCENES[state.id].len * (0.75 + random(state) * 0.7);
+  }
+  function player(seed, t) {
+    if (!players.has(seed)) {
+      const value = new Uint32Array(1);
+      if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(value);
+      else value[0] = Math.floor(Math.random() * 4294967296);
+      const state = { rng: value[0], recent: [], pausedAt: null };
+      next(state, t);
+      state.at -= random(state) * state.len * 0.7;
+      players.set(seed, state);
+    }
+    return players.get(seed);
   }
   function at(seed, t) {
-    const { slots, total } = listFor(seed);
-    let tt = (t + (seed % 997) * 3.1) % total;
-    for (const slot of slots) { if (tt < slot.len) return { id: slot.id, s: tt, left: slot.len - tt }; tt -= slot.len; }
-    return { id: slots[0].id, s: 0, left: slots[0].len };
+    const state = player(seed, t);
+    const time = state.pausedAt ?? t;
+    // Catch up after a short refresh without replacing any remembered visible scenes.
+    for (let i = 0; time >= state.at + state.len && i < 1000; i++) next(state, state.at + state.len);
+    const age = Math.max(0, time - state.at);
+    return { id: state.id, s: age, left: Math.max(0, state.len - age) };
   }
 
   window.OfficeScreens = {
     W, H, SCENES,
+    snapshot: () => [...players].map(([seed, state]) => [seed, { ...state, recent: [...state.recent] }]),
+    restore(saved) {
+      if (!Array.isArray(saved)) return;
+      players.clear();
+      for (const [seed, state] of saved.slice(0, 24)) if (Number.isFinite(seed) && SCENES[state?.id] && Number.isFinite(state.at) && state.len > 0 && Number.isFinite(state.rng) && Array.isArray(state.recent)) {
+        players.set(seed, { ...state, recent: state.recent.filter(id => SCENES[id]).slice(-3) });
+      }
+    },
+    setStatus(seed, status, t) {
+      const state = player(seed, t);
+      if (status !== 'idle' && state.pausedAt === null) state.pausedAt = t;
+      else if (status === 'idle' && state.pausedAt !== null) { state.at += t - state.pausedAt; state.pausedAt = null; }
+    },
     sceneAt: at,
     /** draw the scene of this desk at time t (seconds) */
     draw(P, seed, t) {

@@ -2,7 +2,7 @@
 // Deterministic subscription CLI fixture; never contacts a provider.
 const args = process.argv.slice(2);
 if (args[0] === 'models') { console.log('gemini-3.7-flash-low\tOld Flash\ngemini-3.8-flash-low\tCurrent Flash\ngemini-3.7-flash-medium\tOld Flash medium\ngemini-3.8-flash-medium\tCurrent Flash medium\ngemini-3.9-flash-high\tNewer high\ngemini-4-argon-medium\tArgon'); process.exit(0); }
-if (args.includes('/usage')) { console.log(JSON.stringify({command:{data:{groups:[{name:'Gemini Models',buckets:[{id:'gemini-5h',remaining_fraction:0.99,reset_time:'later'}]}]}}})); process.exit(0); }
+if (args.includes('/usage')) { console.log(JSON.stringify({command:{data:{groups:[{name:'Gemini Models',buckets:[{id:'gemini-5h',remaining_fraction:process.env.DESK_FAKE_AGY === 'empty-quota' ? 0 : process.env.DESK_FAKE_AGY === 'low-quota' ? 0.05 : 0.99,reset_time:'later'}]}]}}})); process.exit(0); }
 const mode = process.env.DESK_FAKE_AGY;
 if (mode === 'fail') process.exit(1);
 console.log(JSON.stringify({ event: 'init', init: { tools: [], model: 'gemini-3.8-flash-medium' } }));

@@ -79,8 +79,9 @@
   }
 
   const SFX = {
-    meow() {
-      tone({ type: 'sawtooth', freqs: [[0, 520], [0.12, 880], [0.42, 600], [0.62, 470]], dur: 0.66, vol: 0.12, attack: 0.05, filter: { freq: 1500, q: 4 }, vibrato: 12 });
+    meow(variant=0) {
+      const pitch=1+((variant%5)-2)*.08;
+      tone({ type: 'sawtooth', freqs: [[0, 520*pitch], [0.12, 880*pitch], [0.42, 600*pitch], [0.62, 470*pitch]], dur: 0.66, vol: 0.12, attack: 0.05, filter: { freq: 1500, q: 4 }, vibrato: 12 });
       tone({ type: 'sine', freqs: [[0, 1040], [0.12, 1760], [0.42, 1200], [0.62, 940]], dur: 0.6, vol: 0.03, attack: 0.05 });
     },
     purr() {

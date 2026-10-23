@@ -24,7 +24,8 @@ test('Antigravity parses structured output and actual token usage; errors and un
   for (const mode of ['tool', 'fail']) {
     process.env.DESK_FAKE_AGY = mode;
     const broken = createAntigravityRunner({ dataDir: tmp(), bin });
-    await assert.rejects(() => broken('', '', {}), /antigravity-/);
+    if (mode === 'tool') await assert.rejects(() => broken('', '', {}), err => err.message === 'antigravity-unexpected-tool' && err.tool === 'view_file' && err.delegated === false);
+    else await assert.rejects(() => broken('', '', {}), /antigravity-/);
   }
 });
 
@@ -33,4 +34,14 @@ test('quota monitoring reads only the verified Gemini Models five-hour bucket', 
   assert.deepEqual(geminiQuota(value),{remaining:0.75,resetAt:'reset'});
   value.command.data.groups[0].buckets[0].disabled=true;
   assert.equal(geminiQuota(value),null);assert.equal(geminiQuota({}),null);
+});
+
+test('Flash can use remaining provider quota below ten percent; actual exhaustion still stops it', async t => {
+  t.after(() => delete process.env.DESK_FAKE_AGY);
+  process.env.DESK_FAKE_AGY = 'low-quota';
+  const available = createAntigravityRunner({ dataDir: tmp(), bin });
+  assert.equal((await available('JSON only', '{}', {})).quota.before.remaining, 0.05);
+  process.env.DESK_FAKE_AGY = 'empty-quota';
+  const empty = createAntigravityRunner({ dataDir: tmp(), bin });
+  await assert.rejects(empty('JSON only', '{}', {}), /quota-exhausted/);
 });

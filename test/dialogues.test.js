@@ -40,17 +40,17 @@ test('pool: built-in lines at once, one background refresh when stale, cached an
   assert.equal(calls, 1);
 });
 
-test('pool: refill is capped per day, can be disabled, survives CLI failures and is persisted', async () => {
+test('pool: no local daily cap, can be disabled, survives CLI failures and is persisted', async () => {
   const dir = tmp();
   let t = Date.parse('2026-10-20T10:00:00Z');
   let calls = 0;
   const cfg = { dialogues: {batchesPerRefresh:1,  maxCallsPerDay: 2, refreshHours: 1 } };
   const dlg = createDialogues({ dataDir: dir, config: () => cfg, now: () => t, run: async () => { calls++; return { lines: [{ kind: 'desk', text: `Satır ${calls}.` }] }; } });
   for (let i = 0; i < 4; i++) { dlg.get('a', office); await sleep(20); t += 2 * 3_600_000; }
-  assert.equal(calls, 2, 'daily budget');
+  assert.equal(calls, 4, 'legacy local limits must not throttle Flash');
   t += 24 * 3_600_000; // next day: budget resets
   dlg.get('a', office); await sleep(20);
-  assert.equal(calls, 3);
+  assert.equal(calls, 5);
   // persisted: a new instance reads the cache without calling the model
   const again = createDialogues({ dataDir: dir, config: () => ({ dialogues: {batchesPerRefresh:1,  enabled: false } }), now: () => t, run: async () => { throw new Error('must not run'); } });
   assert.ok(again.get('a', office).lines.some((l) => /Satır/.test(l.text)));
@@ -61,7 +61,7 @@ test('pool: refill is capped per day, can be disabled, survives CLI failures and
   assert.ok(broken.status().usage.calls >= 1);
 });
 
-test('failed refill backs off; persisted usage survives restart and prevents exceeding the daily cap', async () => {
+test('failed refill backs off while persisted usage counters never impose a daily cap', async () => {
   const dir = tmp(); let calls = 0;
   const config = () => ({ dialogues: {batchesPerRefresh:1,  maxCallsPerDay: 2 } });
   const run = async () => { calls++; throw new Error('unavailable'); };
@@ -72,7 +72,7 @@ test('failed refill backs off; persisted usage survives restart and prevents exc
   const next = createDialogues({ dataDir: dir, config, run });
   await next.refresh('y', office);
   await next.refresh('z', office);
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
 });
 
 test('source-bound lines inherit trusted metadata, expire, and never accept invented source ids', async () => {
@@ -84,25 +84,26 @@ test('source-bound lines inherit trusted metadata, expire, and never accept inve
   assert.ok(!d.get('a').lines.some(l=>l.text==='Uydurulmuş haber.'));
   clock+=2000;assert.ok(!d.get('a').lines.some(l=>l.source));
 });
-test('quota and token guards stop refills without trying to spend to the limit', async () => {
+test('local point limits are ignored; provider quota remains authoritative', async () => {
   let calls=0;
   const d=createDialogues({dataDir:tmp(),config:()=>({dialogues:{batchesPerRefresh:1,maxQuotaPointsPerDay:1}}),run:async()=>{calls++;return {lines:[{kind:'desk',text:'Kısa bir fikir.'}],quota:{points:1,after:{remaining:0.8}}};}});
-  await d.refresh('a',office);await d.refresh('b',office);assert.equal(calls,1);
+  await d.refresh('a',office);await d.refresh('b',office);assert.equal(calls,2);
 });
 
-test('an office named usage cannot overwrite persistent budget metadata', async () => {
+test('an office named usage cannot overwrite persistent usage counters', async () => {
   const dataDir=tmp(),config=()=>({dialogues:{batchesPerRefresh:1,maxCallsPerDay:1}}),run=async()=>({lines:[{kind:'desk',text:'Küçük bir fikir.'}]});
   await createDialogues({dataDir,config,run}).refresh('usage',office);
   const restarted=createDialogues({dataDir,config,run});
-  assert.equal(await restarted.refresh('other',office),false);
   assert.equal(restarted.status().usage.calls,1);
+  assert.equal(await restarted.refresh('other',office),true);
+  assert.equal(restarted.status().usage.calls,2);
 });
 
-test('different scopes serialize model refills and recheck the daily budget before each call', async () => {
+test('different scopes serialize model refills without local budget limits', async () => {
   let active=0,maxActive=0,calls=0;
   const d=createDialogues({dataDir:tmp(),config:()=>({dialogues:{batchesPerRefresh:1,maxCallsPerDay:1}}),run:async()=>{calls++;active++;maxActive=Math.max(maxActive,active);await sleep(10);active--;return {lines:[{kind:'desk',text:'Yeni bir fikir.'}]};}});
   const [first,second]=await Promise.all([d.refresh('a',office),d.refresh('floor:growth',office)]);
-  assert.equal(first,true);assert.equal(second,false);assert.equal(calls,1);assert.equal(maxActive,1);
+  assert.equal(first,true);assert.equal(second,true);assert.equal(calls,2);assert.equal(maxActive,1);
 });
 
  test('clearing location removes unloaded caches and rejects weather from an in-flight refill', async () => {

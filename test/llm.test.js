@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { runDecision, providerOf, strictSchema, withoutTools } from '../server/llm.js';
+import { runDecision, runCodexChat, providerOf, strictSchema, withoutTools } from '../server/llm.js';
 const schema = {type:'object',properties:{reply:{type:'string'}},required:['reply']};
 test('provider validation and nested strict schemas', () => {
   assert.equal(providerOf(), 'claude');
@@ -38,4 +38,15 @@ test('Codex CLI uses subscription credentials, denies tools and reports errors',
   await assert.rejects(runDecision('manager','cv',schema,{provider:'codex'}),/quota exhausted/);
   delete process.env.DESK_CODEX_FAIL; process.env.DESK_CODEX_TOOL='1';
   await assert.rejects(runDecision('manager','cv',schema,{provider:'codex'}),/Codex/);
+});
+
+test('native news web search is allowed without shell execution or a new thread', async t => {
+ const dir=mkdtempSync(resolve('data/test-cli','web-')),log=join(dir,'calls.jsonl');
+ const keys=['DESK_CODEX_BIN','DESK_CODEX_LOG'];const previous=Object.fromEntries(keys.map(k=>[k,process.env[k]]));
+ t.after(()=>{for(const k of keys)if(previous[k]===undefined)delete process.env[k];else process.env[k]=previous[k];rmSync(dir,{recursive:true,force:true});});
+ Object.assign(process.env,{DESK_CODEX_BIN:resolve('test/fake-codex.mjs'),DESK_CODEX_LOG:log});
+ const events=[];const result=await runCodexChat('research','search',{cwd:dir,sessionId:'11111111-1111-4111-8111-111111111111',allowWeb:true,onEvent:e=>events.push(e)});
+ assert.equal(result.reply,'codex chat reply');const call=JSON.parse(readFileSync(log,'utf8').trim());
+ assert.ok(call.args.includes('web_search="live"'));assert.ok(call.args.includes('shell_tool'));assert.ok(call.args.includes('resume'));assert.ok(call.args.includes('read-only'));
+ assert.ok(events.some(e=>e.text.includes('Web kaynakları')));
 });

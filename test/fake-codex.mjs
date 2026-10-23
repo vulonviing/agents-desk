@@ -14,7 +14,8 @@ if (process.env.DESK_CODEX_TOOL) { out({type:'item.started',item:{type:'command_
 if (!args.includes('--output-schema')) {
   // real chat turn: free text, with one read-only command like a real Codex would run
   out({type:'thread.started',thread_id:'11111111-1111-4111-8111-111111111111'});
-  out({type:'item.started',item:{type:'command_execution',command:process.env.DESK_CODEX_COMMAND ?? 'rg -n jobtable .'}});
+  if (args.includes('web_search="live"')) out({type:'item.started',item:{type:'web_search'}});
+  else out({type:'item.started',item:{type:'command_execution',command:process.env.DESK_CODEX_COMMAND ?? 'rg -n jobtable .'}});
   out({type:'item.completed',item:{type:'agent_message',text:process.env.DESK_CODEX_REPLY ?? 'codex chat reply'}});
   out({type:'turn.completed'});
   process.exit(0);

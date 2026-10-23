@@ -51,7 +51,42 @@ test('the briefing covers AI, German and Turkish politics, tech and more; each f
  const urls=[];const b=createBriefing({dataDir:tmp(),now:()=>at,fetcher:async url=>{urls.push(url);return new Response(url.includes('bing.com')?`<rss>${item(at,'https://example.com/n')}</rss>`:'<rss></rss>');}});
  const r=await b.get({topics:['ai','germany'],standing:true});
  assert.equal(urls.filter(u=>u.includes('bing.com/news/search')).length,STANDING_QUERIES.length);
- assert.ok(STANDING_QUERIES.some(q=>/Elon Musk flying car/.test(q.query))&&STANDING_QUERIES.some(q=>/AfD/.test(q.query))&&STANDING_QUERIES.some(q=>/GPT/.test(q.query))&&STANDING_QUERIES.some(q=>/Gemini/.test(q.query)));
+ assert.ok(STANDING_QUERIES.some(q=>/Türkiye siyaset/.test(q.query))&&STANDING_QUERIES.some(q=>/AfD/.test(q.query))&&STANDING_QUERIES.some(q=>/GPT/.test(q.query))&&STANDING_QUERIES.some(q=>/Gemini/.test(q.query)));
  assert.ok(r.sources.every(s=>s.role==='genel'));
  await assert.rejects(()=>b.get({topics:['ai','nonsense']}),/invalid-topic/);
+});
+
+test('explicit refresh fetches public feeds and searches again while ordinary reads share their cache', async () => {
+  const urls = [];
+  const briefing = createBriefing({ dataDir: tmp(), now: () => at, fetcher: async url => {
+    urls.push(url);
+    return new Response(`<rss>${item(at, url.includes('bing.com') ? 'https://example.com/fresh' : 'https://www.bbc.com/news/articles/test')}</rss>`);
+  } });
+  const args = { topic: 'science', queries: [{ role: 'genel', query: 'public science news' }] };
+  await briefing.get(args); assert.equal(urls.length, 2);
+  await briefing.get(args); assert.equal(urls.length, 2);
+  const fresh = await briefing.get({ ...args, fresh: true });
+  assert.equal(urls.length, 4);
+  assert.ok(fresh.sources.some(s => s.id.startsWith('search:')));
+  const handler = createBriefingMcp(briefing);
+  assert.ok((await handler({ id: 7, method: 'tools/call', params: { name: 'get_daily_briefing', arguments: { fresh: 'yes' } } })).error);
+});
+
+test('AI discovery retains real community rank and votes without reading discussion or account data', async () => {
+  const urls = [], dataDir = tmp();
+  const b = createBriefing({ dataDir, now: () => at, fetcher: async url => {
+    urls.push(url);
+    if (url.endsWith('/topstories.json')) return new Response(JSON.stringify([123, 124, 125]));
+    if (url.endsWith('/item/123.json')) return new Response(JSON.stringify({ type: 'story', time: at / 1000, score: 315, title: 'New AI model', url: 'https://example.com/model', kids: [999], by: 'PRIVATE_ACCOUNT_UNUSED', text: 'DISCUSSION_UNUSED' }));
+    if (url.endsWith('/item/124.json')) return new Response(JSON.stringify({ type: 'story', time: at / 1000, score: 10, title: 'Invalid target', url: 'https://127.0.0.1/private' }));
+    if (url.endsWith('/item/125.json')) return new Response(JSON.stringify({ type: 'story', time: at / 1000 - 3 * 86400, score: 10, title: 'Old', url: 'https://example.com/old' }));
+    return new Response('<rss></rss>');
+  } });
+  const result = await b.get({ topics: ['ai'] });
+  assert.equal(result.sources.length, 1);
+  assert.deepEqual(result.sources[0].discovery, [{ kind: 'community-ranking', source: 'Hacker News', rank: 1, votes: 315 }]);
+  assert.ok(!JSON.stringify(result).includes('PRIVATE_ACCOUNT_UNUSED'));
+  assert.ok(!JSON.stringify(result).includes('DISCUSSION_UNUSED'));
+  assert.ok(!urls.some(u => /999|user\//.test(u)));
+  const count = urls.length; await b.get({ topics: ['ai'] }); assert.equal(urls.length, count);
 });

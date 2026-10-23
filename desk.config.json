@@ -4,14 +4,11 @@
     "enabled": true,
     "model": "latest-flash",
     "refreshHours": 8,
-    "maxCallsPerDay": 400,
     "linesPerRefresh": 128,
     "poolMax": 2000,
     "provider": "antigravity",
     "retryMinutes": 30,
-    "maxTokensPerDay": 60000000,
     "reserveTokensPerCall": 80000,
-    "maxQuotaPointsPerDay": 60,
     "effort": "medium",
     "batchesPerRefresh": 5,
     "warmAll": true
@@ -19,25 +16,43 @@
   "desks": [
     {
       "id": "emrecan-cv",
-      "name": "Emrecan CV",
+      "name": "Başvuru Atölyesi",
       "path": "~/Documents/Emrecan CV",
-      "coordinator": "Başvuru Koordinatörü",
+      "coordinator": "Deniz",
       "description": "Başvuru hattı: ilan topla/filtrele, CV ve cover letter hazırla, derle, son kontrol.",
       "topic": "business",
       "concept": "başvuru kulisi, ilan filtreleme, anlatım kliniği",
-      "coordinatorEn": "Application Coordinator",
-      "descriptionEn": "Application pipeline: collect and filter postings, prepare the CV and cover letter, build, final check."
+      "coordinatorEn": "Deniz",
+      "descriptionEn": "Application pipeline: collect and filter postings, prepare the CV and cover letter, build, final check.",
+      "label": "Başvuru Atölyesi",
+      "labelEn": "Application Studio"
     },
     {
       "id": "cv-checker",
-      "name": "cv-checker",
+      "name": "CV Kliniği",
       "path": "~/Documents/cv-checker",
-      "coordinator": "CV Kontrol Koordinatörü",
+      "coordinator": "Ece",
       "description": "CV'ni yükle, yapılandırılmış bir değerlendirme raporu al.",
       "topic": "business",
       "concept": "CV eleştirisi, dürüst geri bildirim, tasarım gözü",
-      "coordinatorEn": "CV Check Coordinator",
-      "descriptionEn": "Drop in your CV and get a structured evaluation report."
+      "coordinatorEn": "Ece",
+      "descriptionEn": "Drop in your CV and get a structured evaluation report.",
+      "label": "CV Kliniği",
+      "labelEn": "CV Clinic"
+    },
+    {
+      "id": "news",
+      "name": "Haber Masası",
+      "label": "Haber Masası",
+      "labelEn": "News Desk",
+      "kind": "news",
+      "path": ".",
+      "coordinator": "Bora",
+      "coordinatorEn": "Bora",
+      "description": "Saatlik haber baskısını Gemini Flash ile hazırlayıp LED ekranına taşır.",
+      "descriptionEn": "Prepares hourly news editions with Gemini Flash and carries them to the LED.",
+      "topic": "ai",
+      "concept": "haber editörlüğü, gündem, ofis sohbetleri"
     }
   ]
 }

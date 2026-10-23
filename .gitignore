@@ -6,3 +6,4 @@ workspace/
 .playwright-mcp/
 shot-*.png
 app/dist/
+.qa/

@@ -1,3 +1,5 @@
+import { startExternalMonitor } from './external-monitor.js';
+import { selectNews } from './news-selection.js';
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -15,6 +17,11 @@ import { getBriefing } from './briefing-client.js';
 import { createAntigravityRunner } from './antigravity.js';
 import { providerOf } from './llm.js';
 import { createUsage } from './usage.js';
+import { createUsageDetails } from './usage-details.js';
+import { createNewsSession } from './news-session.js';
+import { createApplicationActivity } from './application-activity.js';
+import { createApplicationClassifier } from './application-classifier.js';
+import { createApplicationBoard } from './application-board.js';
 
 const OFFICE_DIR = join(ROOT, 'office', 'public');
 const TYPES = {
@@ -69,6 +76,7 @@ export function createDeskServer(deps = {}) {
   const getDesk = (id) => desks().find((d) => d.id === id) ?? null;
 
   const usage = deps.usage ?? createUsage();
+  const usageDetails = deps.usageDetails ?? createUsageDetails();
 
   // ---------- live events (SSE) ----------
   const clients = new Set();
@@ -96,7 +104,7 @@ export function createDeskServer(deps = {}) {
   const snapshot = () => ({
     at: new Date().toISOString(),
     desks: desks().map(({ id, name, description, descriptionEn, coordinator, coordinatorEn }) => ({ id, name, description, descriptionEn, coordinator, coordinatorEn })),
-    agents: buildCoordinators(desks(), (id) => chats.state(id)),
+    agents: buildCoordinators(desks(), (id) => chats.state(id)).map(a => a.deskId === 'emrecan-cv' ? { ...a, workflow: applicationActivity.snapshot() } : a),
   });
   let lastOffice = '';
   const pushOffice = () => {
@@ -107,19 +115,22 @@ export function createDeskServer(deps = {}) {
     lastOffice = sig;
     emit('office', { at, ...rest });
   };
+  const applicationActivity = (deps.createApplicationActivity ?? createApplicationActivity)({ root: getDesk('emrecan-cv')?.path, onChange: pushOffice });
+  applicationActivity.start?.();
+  const applicationBoard = createApplicationBoard({ root: getDesk('emrecan-cv')?.path, classifier: createApplicationClassifier({file:join(dataDir,'application-classifications.json'),...(deps.applicationDecision?{run:deps.applicationDecision}:{})}) });
 
   // ---------- ambient dialogue pools (Antigravity Flash refills them rarely; see server/dialogues.js) ----------
   const newsFeedback = createNewsFeedback({ dataDir });
   const newsCreator = createDialogueCreator({ dataDir, feedback: newsFeedback.editorial });
   const readLocation = () => { try { return JSON.parse(readFileSync(join(dataDir, 'weather-location.json'), 'utf8')); } catch { return {}; } };
   const briefingOf = deps.briefing ?? getBriefing;
-  const dialogues = createDialogues({ dataDir, config, preferences: newsFeedback, creator: newsCreator, run: createAntigravityRunner({ dataDir }), onChange: (scope) => emit('dialogues', { scope }),
+  const dialogues = createDialogues({ dataDir, config, hold: true, preferences: newsFeedback, creator: newsCreator, run: deps.dialogueRunner ?? createAntigravityRunner({ dataDir }), onChange: (scope) => emit('dialogues', { scope }),
     briefing: async (office) => briefingOf(dataDir, { topics: office.topics ?? [office.topic].filter(Boolean), queries: office.searchQueries ?? [], standing: true, ...readLocation() }) });
   const officeContext = (id) => {
     const desk = getDesk(id);
     if (!desk) return null;
     const coordinator = desk.coordinator ?? `${desk.name} Koordinatörü`;
-    return { name: desk.name, floor: 'Ofis', agents: [{ name: coordinator, mission: desk.description ?? '' }], recent: [], topic: desk.topic ?? 'technology', curator: coordinator, concept: desk.concept ?? 'masa başı sohbeti, kısa molalar, gündem' };
+    return { name: desk.label ?? desk.name, floor: 'Ofis', agents: [{ name: coordinator, mission: desk.description ?? '' }], recent: [], topic: desk.topic ?? 'technology', curator: coordinator, concept: desk.concept ?? 'masa başı sohbeti, kısa molalar, gündem' };
   };
   const floorContext = () => ({
     name: 'Ofis', floor: 'Ofis',
@@ -127,32 +138,34 @@ export function createDeskServer(deps = {}) {
     recent: [], topic: 'business', curator: 'Masaların gündem küratörleri',
     concept: 'Ortak açık ofis: farklı masalardan meslektaşların karşılaşması, disiplinler arası merak, gündem tartışması, pencere önü yorumları. Masa farklarını konuştur. En az %70 genel satır olsun.',
   });
-  const newsBoard = createNewsBoard({ dataDir, preferences: newsFeedback, editorial: (job) => dialogues.editorial(job), onChange: () => emit('news', {}), collect: async (call) => {
-    const plan = await newsCreator.plan(`floor:${FLOOR_ID}`, floorContext(), call);
-    return briefingOf(dataDir, { topics: ['ai', ...(plan.topics ?? [])].filter((v, i, all) => all.indexOf(v) === i).slice(0, 5), queries: plan.queries ?? [], standing: true });
+  const newsBoard = createNewsBoard({ dataDir, hold: true, selection: selectNews, details: async articles => (await briefingOf(dataDir, { articleUrls: articles.map(a => a.url) })).details ?? [], preferences: newsFeedback, editorial: (job) => dialogues.editorial(job), onChange: () => emit('news', {}), collect: async (call, edition, onProgress) => {
+    onProgress({ phase: 'planning' });
+    const plan = await newsCreator.plan(`floor:${FLOOR_ID}`, { ...floorContext(), edition }, call);
+    onProgress({ phase: 'search' });
+    return briefingOf(dataDir, { fresh: !!edition, topics: ['ai', 'germany', 'turkey', 'technology'], queries: (plan.queries ?? []).filter(q => ['ai', 'germany', 'turkey'].includes(q.topic)), standing: true });
   } });
-  // The dialogue libraries of ALL scopes are kept fresh in the background, one scope at a time.
-  const warmDialogues = () => {
-    if (config()?.dialogues?.enabled !== false) void newsBoard.refresh();
-    return dialogues.warm([...desks().map((d) => ({ id: d.id, ctx: officeContext(d.id) })), { id: `floor:${FLOOR_ID}`, ctx: floorContext() }]);
-  };
-  let warmTimer = null;
-  if (deps.warmDialogues) { setTimeout(warmDialogues, 20_000).unref(); warmTimer = setInterval(warmDialogues, 10 * 60_000); warmTimer.unref(); }
+  const newsSession = createNewsSession({ dataDir, board: newsBoard, dialogues, emit,
+    scopes: () => [...desks().map(d => ({ id: d.id, ctx: officeContext(d.id) })), { id: `floor:${FLOOR_ID}`, ctx: floorContext() }],
+  });
+  if (deps.warmDialogues) newsSession.start();
 
   // A chat target: a desk's coordinator, in the project's own folder, read-only.
   const chatTarget = (id, lang = 'tr') => {
     const desk = id.endsWith('#project') ? getDesk(id.slice(0, -'#project'.length)) : null;
     if (!desk) return null;
-    return { room: desk, def: { kind: 'project', key: 'project', name: desk.coordinator ?? desk.name, coordinator: true, lang } };
+    return { room: desk.kind === 'news' ? { ...desk, path: resolve(ROOT, desk.path ?? '.') } : desk, def: { kind: desk.kind === 'news' ? 'news' : 'project', key: 'project', name: desk.coordinator ?? desk.name, coordinator: true, lang } };
   };
 
+  const newsChatContexts = new Map(); // bounded public evidence in memory, never persisted
   async function handleApi(req, res, url) {
     const path = url.pathname;
     const method = req.method;
     let m;
 
     if (method === 'GET') {
+      if (path === '/api/applications/board') return send(res, 200, await applicationBoard.read({ fresh: url.searchParams.get('refresh') === '1' }));
       if (path === '/api/news/feedback') return send(res, 200, newsFeedback.get(url.searchParams.get('sourceId')));
+      if (path === '/api/news/session') return send(res, 200, newsSession.snapshot());
       if (path === '/api/news/board') return send(res, 200, newsBoard.read());
       if ((m = path.match(/^\/api\/agents\/([^/]+)\/terminal$/))) {
         const id = decodeURIComponent(m[1]);
@@ -160,7 +173,8 @@ export function createDeskServer(deps = {}) {
         return send(res, 200, { entries: cliLog.filter((e) => e.provider === provider && e.managerId === id) });
       }
       if (path === '/api/office') return send(res, 200, snapshot());
-      if (path === '/api/usage') return send(res, 200, await usage.read());
+      if (path === '/api/usage/details') return send(res, 200, await usageDetails.read({ fresh: url.searchParams.get('refresh') === '1' }));
+      if (path === '/api/usage') return send(res, 200, await usage.read({ fresh: url.searchParams.get('refresh') === '1' }));
       if (path === '/api/weather') {
         // current weather for the window glass; needs the user's location permission, shares nothing else
         const location = readLocation();
@@ -208,9 +222,24 @@ export function createDeskServer(deps = {}) {
     if (method !== 'POST') return false;
     if (!originOk(req)) return fail(res, 403, 'forbidden origin');
 
+    if (path === '/api/applications/refresh') {
+      const body = await readJson(req);
+      return send(res, 200, await applicationBoard.read({fresh:true,provider:providerOf(body.provider)}));
+    }
+    if (path === '/api/news/session/refresh') {
+      await readJson(req);
+      void newsSession.run({ force: true }).catch(() => { /* a failed preparation keeps the current edition */ });
+      return send(res, 202, newsSession.snapshot());
+    }
+    if (path === '/api/news/session/publish') {
+      const body = await readJson(req);
+      const result = newsSession.publish(body.edition);
+      return send(res, result.ok ? 200 : 409, result);
+    }
     if (path === '/api/news/feedback') {
       const body = await readJson(req);
       const result = newsFeedback.set({ sourceId: body.sourceId, value: body.value, reason: body.reason });
+      newsSession.invalidateSelection();
       for (const pool of dialogues.status().pools) emit('dialogues', { scope: pool.id });
       emit('news', {});
       return send(res, 200, result);
@@ -222,27 +251,47 @@ export function createDeskServer(deps = {}) {
       if (body.clear === true) {
         try { unlinkSync(file); } catch { /* already unset */ }
         dialogues.invalidate();
+        newsSession.syncPreparedPools();
         return send(res, 200, { configured: false });
       }
       if (!Number.isFinite(body.latitude) || !Number.isFinite(body.longitude) || Math.abs(body.latitude) > 90 || Math.abs(body.longitude) > 180) return fail(res, 400, 'Konum geçersiz.');
       mkdirSync(dataDir, { recursive: true });
       writeFileSync(file, JSON.stringify({ latitude: Math.round(body.latitude * 10) / 10, longitude: Math.round(body.longitude * 10) / 10 }), { mode: 0o600 });
       dialogues.invalidate();
+      newsSession.syncPreparedPools();
       return send(res, 200, { configured: true });
     }
 
     if ((m = path.match(/^\/api\/agents\/([^/]+)\/chat(\/reset)?$/))) {
       const id = decodeURIComponent(m[1]);
-      const { message, provider: rawProvider, lang: rawLang } = await readJson(req);
+      const { message, provider: rawProvider, lang: rawLang, articleId } = await readJson(req);
       const target = chatTarget(id, rawLang === 'en' ? 'en' : 'tr');
       if (!target) return fail(res, 404, 'Ajan bulunamadı.');
       const provider = providerOf(rawProvider);
       const chatId = `${provider}:${id}`;
       if (m[2]) {
-        chats.reset(chatId);
+        chats.reset(chatId); newsChatContexts.delete(chatId);
         pushOffice();
         return send(res, 200, { messages: [] });
       }
+      if (target.def.kind === 'news') {
+        if (typeof message !== 'string' || !message.trim() || message.length > 2000) return fail(res, 400, 'Mesaj 1 ile 2000 karakter arasında olmalı.');
+        if (articleId !== undefined && articleId !== null && (typeof articleId !== 'string' || articleId.length > 180)) return fail(res, 400, 'Geçersiz haber kimliği.');
+        if (articleId) {
+          let article = newsBoard.get().articles.find(a => a.articleId === articleId);
+          if (!article) { try { article = newsFeedback.get(articleId).article; } catch { return fail(res, 404, 'Haber bulunamadı.'); } }
+          let context = newsChatContexts.get(chatId);
+          if (context?.articleId !== article.articleId) {
+            let articleText = '';
+            try { articleText = (await briefingOf(dataDir, { articleUrls: [article.url] })).details?.find(d => d.url === article.url)?.text?.slice(0, 12000) ?? ''; } catch { /* metadata still supports a grounded conversation */ }
+            context = { articleId: article.articleId, title: article.title, titleTr: article.titleTr, titleEn: article.titleEn, explanation: article.explanation, explanationEn: article.explanationEn, publisher: article.publisher, url: article.url, publishedAt: article.publishedAt, articleText };
+            newsChatContexts.set(chatId, context);
+            if (newsChatContexts.size > 32) newsChatContexts.delete(newsChatContexts.keys().next().value);
+          }
+          target.def.newsContext = context;
+        } else if (articleId === null) newsChatContexts.delete(chatId);
+        else target.def.newsContext = newsChatContexts.get(chatId);
+      } else if (articleId !== undefined && articleId !== null) return fail(res, 400, 'Haber bağlamı yalnız Haber Masası içindir.');
       return send(res, 200, { messages: await chats.send(target.room, target.def, chatId, message, provider, { onEvent: cliEvents(provider, id, target.def.name) }) });
     }
     return false;
@@ -269,7 +318,8 @@ export function createDeskServer(deps = {}) {
   });
   server.on('close', () => {
     clearInterval(heartbeat);
-    clearInterval(warmTimer);
+    applicationActivity.stop?.();
+    newsSession.stop();
   });
   return server;
 }
@@ -287,5 +337,6 @@ async function listen(server, port) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = await listen(createDeskServer({ warmDialogues: true }), loadConfig().port ?? 4317);
+  startExternalMonitor({port});
   console.log(`Agents Desk → http://127.0.0.1:${port}/`);
 }

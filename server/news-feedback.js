@@ -23,7 +23,7 @@ export function createNewsFeedback({ dataDir, now = Date.now }) {
     for (const source of sources) {
       const s = structureNews(source); if (!s || !s.title || typeof s.id !== 'string' || s.id.length > 180) continue;
       const previous = article(s.articleId);
-      const item = { articleId: s.articleId, sourceIds: [...new Set([...(previous?.sourceIds ?? []), s.id])].slice(-12), kind: 'news', title: s.title, url: s.url, publisher: String(s.publisher ?? '').slice(0, 80), category: s.category, tags: s.tags, query: typeof s.query === 'string' ? s.query.slice(0, 100) : null, origin: s.origin, publishedAt: Number(s.publishedAt) || null };
+      const item = { articleId: s.articleId, sourceIds: [...new Set([...(previous?.sourceIds ?? []), s.id])].slice(-12), kind: 'news', title: s.title, url: s.url, publisher: String(s.publisher ?? '').slice(0, 80), category: s.category, tags: s.tags, query: typeof s.query === 'string' ? s.query.slice(0, 100) : null, origin: s.origin, publishedAt: Number(s.publishedAt) || null, eventId: s.eventId ?? previous?.eventId ?? null, eventKey: s.eventKey ?? previous?.eventKey ?? null };
       if (JSON.stringify(item) !== JSON.stringify(previous)) { const articles = [item, ...state.articles.filter(a => a.articleId !== item.articleId)]; const rated = new Set(state.ratings.map(r => r.articleId)); state.articles = [...articles.filter(a => rated.has(a.articleId)), ...articles.filter(a => !rated.has(a.articleId))].slice(0, MAX_ARTICLES); changed = true; }
     }
     if (changed) { save(); cachedProfile = null; }
@@ -70,5 +70,11 @@ export function createNewsFeedback({ dataDir, now = Date.now }) {
     const a = article(source.articleId ?? source.id), r = rating(a);
     return !(r?.value === 'dislike' && r.reason !== 'style');
   }
-  return { register, get, set, editorial, score, accepts };
+  function consumed() {
+    return state.ratings.filter(r => r.value === 'like').flatMap(r => {
+      const a = article(r.articleId);
+      return a ? [{ articleId: a.articleId, title: a.title, eventId: a.eventId, eventKey: a.eventKey }] : [];
+    });
+  }
+  return { register, get, set, editorial, score, accepts, consumed };
 }

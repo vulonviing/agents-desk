@@ -31,7 +31,7 @@ export function createAntigravityRunner({ dataDir, bin = process.env.DESK_AGY_BI
       const child = spawn(bin, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
       let output = '', pending = '', diagnostic = '', result, failure, bytes = 0;
       const category = value => /quota|rate.?limit|resource.exhausted|capacity|429/i.test(value) ? 'antigravity-quota-or-capacity' : /timeout|timed out/i.test(value) ? 'antigravity-timeout' : /schema|json/i.test(value) ? 'antigravity-schema' : /auth|sign.in|login/i.test(value) ? 'antigravity-auth' : 'antigravity-failed';
-      const stop = reason => { failure = new Error(reason); child.kill('SIGKILL'); };
+      const stop = (reason, detail = {}) => { failure = Object.assign(new Error(reason), detail); child.kill('SIGKILL'); };
       const timer = setTimeout(() => stop('antigravity-timeout'), timeoutMs);
       child.stdout.on('data', chunk => {
         bytes += chunk.length;
@@ -45,7 +45,9 @@ export function createAntigravityRunner({ dataDir, bin = process.env.DESK_AGY_BI
           if (!line.trim()) continue;
           try {
             const event = JSON.parse(line);
-            if (event.step_update?.step_type === 'tool' && event.step_update?.tool_name !== 'finish' || event.step_update?.subagent_info) return stop('antigravity-unexpected-tool:' + String(event.step_update?.tool_name ?? 'unknown').replace(/[^\w.-]/g, '').slice(0, 50));
+            if (event.step_update?.step_type === 'tool' && event.step_update?.tool_name !== 'finish' || event.step_update?.subagent_info) {
+              return stop('antigravity-unexpected-tool', { tool: String(event.step_update?.tool_name ?? 'unknown').replace(/[^\w.-]/g, '').slice(0, 50), delegated: !!event.step_update?.subagent_info });
+            }
             if (event.event === 'result') result = event.result;
           } catch { stop('antigravity-invalid-output'); }
         }
@@ -67,11 +69,11 @@ export function createAntigravityRunner({ dataDir, bin = process.env.DESK_AGY_BI
   }
   return async (system, input, schema, { model = 'latest-flash', effort = 'medium' } = {}) => {
     let before = null;
-    try { before = geminiQuota(JSON.parse(await command(['-p', '/usage', '--output-format', 'json', '--print-timeout', '10s'], { timeoutMs: 15_000 }))); } catch { /* token/call caps still apply */ }
-    if (before && before.remaining < 0.1) throw new Error('antigravity-quota-low');
+    try { before = geminiQuota(JSON.parse(await command(['-p', '/usage', '--output-format', 'json', '--print-timeout', '10s'], { timeoutMs: 15_000 }))); } catch { /* generation reports any actual provider quota error */ }
+    if (before && before.remaining <= 0) throw new Error('antigravity-quota-exhausted');
     selected = model === 'latest-flash' ? latestFlash(await command(['models'], { timeoutMs: 15_000 }), effort) : model;
     if (!/^gemini-\d+(?:\.\d+)?-flash-(?:low|medium|high)$/.test(selected)) throw new Error('flash-model-required');
-    const result = await command(['-p', `${system}\n\n${input}\nUse no tools, files, browsing, skills or delegation. Answer from supplied metadata only.`, '--model', selected,
+    const result = await command(['-p', `This is a single JSON data response, not a coding task or project workflow. Do not call task_boundary, notify_user, file, terminal, search, skill, or delegation tools. Do not create task files or workflow logs. Return the final JSON directly.\n\n${system}\n\n${input}\nUse no tools, files, browsing, skills or delegation. Answer from supplied metadata only.`, '--model', selected,
       '--mode', 'plan', '--sandbox', '--disable-slash-commands', '--output-format', 'stream-json', '--json-schema', JSON.stringify(schema), '--print-timeout', '300s'], { stream: true });
     let after = null;
     try { after = geminiQuota(JSON.parse(await command(['-p', '/usage', '--output-format', 'json', '--print-timeout', '10s'], { timeoutMs: 15_000 }))); } catch { /* missing quota never triggers more model calls */ }

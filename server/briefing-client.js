@@ -6,9 +6,9 @@ export function getBriefing(dataDir, args) {
     const child = spawn(process.execPath, [fileURLToPath(new URL('./briefing-mcp.js', import.meta.url)), dataDir], { stdio: ['pipe','pipe','ignore'] });
     let buffer = '', bytes = 0, done = false;
     const finish = (error, value) => { if (done) return; done = true; clearTimeout(timer); child.kill(); error ? reject(error) : resolve(value); };
-    const timer = setTimeout(() => finish(new Error('briefing-timeout')), 20_000);
+    const timer = setTimeout(() => finish(new Error('briefing-timeout')), args.articleUrls ? 30_000 : 40_000);
     child.stdout.on('data', chunk => {
-      bytes += chunk.length; if (bytes > 64 * 1024) return finish(new Error('briefing-too-large'));
+      bytes += chunk.length; if (bytes > (args.articleUrls ? 1024 * 1024 : 512 * 1024)) return finish(new Error('briefing-too-large'));
       buffer += chunk; let end;
       while ((end = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0,end); buffer = buffer.slice(end+1);

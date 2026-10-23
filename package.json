@@ -6,7 +6,9 @@
   "description": "Pixel-art open office: project desks with read-only CLI coordinators and a Gemini-curated news and dialogue life",
   "scripts": {
     "desk": "node server/server.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "monitor:build": "node app/monitor/build.mjs",
+    "monitor": "node app/monitor/start.mjs"
   },
   "engines": {
     "node": ">=22"

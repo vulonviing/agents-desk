@@ -103,3 +103,12 @@ test('CLI session ids (never message text) survive a server restart through sess
   second.reset('claude:cv#project');
   assert.equal(createChats({ sessionsFile: file }).state('cv#project'), null);
 });
+
+test('news research enables native web tools while keeping the existing CLI session', () => {
+  const def={kind:'news',name:'Bora',lang:'tr'};
+  const args=chatArgs(room('/x'),def,'existing-session');
+  assert.equal(args[args.indexOf('--tools')+1],'WebSearch,WebFetch');
+  assert.equal(args[args.indexOf('--allowedTools')+1],'WebSearch,WebFetch');
+  assert.equal(args[args.indexOf('--resume')+1],'existing-session');
+  assert.match(chatPrompt(room('/x'),def),/native public web search/);
+});

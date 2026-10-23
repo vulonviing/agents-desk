@@ -9,6 +9,7 @@
   const news = { articles: [], updatedAt: null, refreshing: false, error: null };
   const listeners = new Set();
   let loading = false;
+  let discuss = () => {};
   async function refresh() {
     if (loading) return;
     loading = true;
@@ -30,10 +31,12 @@
 
   // ---------- popup (bottom right): a news article or an ambient conversation ----------
   let popup = null;
+  let conversation = null;
   let outside = null;
   function close() {
     if (popup) popup.remove();
     popup = null;
+    conversation = null;
     document.removeEventListener('pointerdown', outside, true);
     document.removeEventListener('keydown', onKey, true);
   }
@@ -95,9 +98,14 @@
         a ? h('div.news-explanation',
           h('nav', { 'aria-label': I.t('pop.nav') }, h('button', { disabled: list.length < 2, onclick: step(-1) }, I.t('pop.prev')), h('small', i >= 0 ? `${i + 1} / ${list.length}` : I.t('pop.item')), h('button', { disabled: list.length < 2, onclick: step(1) }, I.t('pop.next'))),
           h('h3', I.title(a)), h('small', I.t('pop.gemini')),
-          h('p', I.explanation(a) ?? (a.explanationStatus === 'pending' ? I.t('pop.pending') : I.t('pop.unavailable'))))
+          h('p.news-summary', I.explanation(a) ?? (a.explanationStatus === 'pending' ? I.t('pop.pending') : I.t('pop.unavailable'))))
           : h('p.muted', news.refreshing ? I.t('pop.refreshing') : I.t('pop.none')),
         a ? h('a', { href: a.url, target: '_blank', rel: 'noopener noreferrer' }, `${a.publisher} · ${new Date(a.publishedAt).toLocaleDateString(I.t('locale'))} ↗`) : null,
+        a?.popularity ? h('small.news-popularity',
+          `${I.t('pop.popularity')}: ${a.popularity.publishers} ${I.t('pop.publishers')}` +
+          (a.popularity.communityRank ? ` · Hacker News #${a.popularity.communityRank} · ${a.popularity.communityVotes} ${I.t('pop.votes')}` : '') +
+          (a.preferenceOverride ? ` · ${I.t('pop.majorOverride')}` : '')) : null,
+        a ? h('button.primary.news-discuss', { type: 'button', onclick: () => { close(); discuss(a); } }, I.t('news.discuss')) : null,
         a ? feedback(a, false) : null);
     };
     show(render(article));
@@ -107,15 +115,30 @@
   function openConversation(record, nameOf, newsSource) {
     const source = newsSource ?? record.source;
     const fullSource = source ? news.articles.find((s) => s.articleId === source.articleId) ?? source : null;
-    const turns = h('div.ambient-turns', { 'aria-live': 'polite' },
-      ...record.turns.map((t) => h('div.ambient-turn' + (t.speakerId === record.b ? '.reply' : ''), h('strong.ambient-speaker', nameOf(t.speakerId)), h('p', t.text))),
-      record.active ? h('span.ambient-next', I.t('pop.talking')) : null);
+    const turns = h('div.ambient-turns', { 'aria-live': 'polite', 'aria-relevant': 'additions text' });
     show(h('section.popup', { role: 'dialog', 'aria-label': I.t('pop.talk') },
       h('header', h('strong', `${nameOf(record.a)} · ${nameOf(record.b)}`), h('button', { type: 'button', 'aria-label': I.t('pop.closeTalk'), onclick: close }, '✕')),
       turns,
       fullSource ? h('a', { href: fullSource.url, target: '_blank', rel: 'noopener noreferrer' }, `${fullSource.publisher} · ${new Date(fullSource.publishedAt).toLocaleDateString(I.t('locale'))} ↗`) : null,
       fullSource?.kind === 'news' ? feedback(fullSource, true) : null));
+    conversation = { id: record.id, record, turns, nameOf, rendered: 0 };
+    updateConversation(record);
   }
+  function updateConversation(record) {
+    const c = conversation;
+    if (!popup || !c || c.id !== record.id) return;
+    c.record = record;
+    const follow = popup.scrollTop + popup.clientHeight >= popup.scrollHeight - 32;
+    c.turns.querySelector('.ambient-next')?.remove();
+    for (const turn of record.turns.slice(c.rendered)) {
+      c.turns.append(h('div.ambient-turn' + (turn.speakerId === record.b ? '.reply' : ''),
+        h('strong.ambient-speaker', c.nameOf(turn.speakerId)), h('p', turn.text)));
+    }
+    c.rendered = record.turns.length;
+    if (record.active) c.turns.append(h('span.ambient-next', { role: 'status' }, I.t('pop.talking')));
+    if (follow) popup.scrollTop = popup.scrollHeight;
+  }
+  I.onChange(() => { if (conversation) updateConversation(conversation.record); });
   function openSource(source) { openNews(news.articles.find((s) => s.articleId === source.articleId) ?? source); }
 
   // ---------- location permission for the weather line ----------
@@ -130,5 +153,5 @@
   }
   const clearLocation = () => postJson('/api/dialogues/location', { clear: true });
 
-  window.OfficeNews = { news, refresh, subscribe, weatherInfo, openNews, openConversation, openSource, close, locationConfigured, requestLocation, clearLocation };
+  window.OfficeNews = { onDiscuss(fn) { discuss = fn; }, news, refresh, subscribe, weatherInfo, openNews, openConversation, updateConversation, openSource, close, locationConfigured, requestLocation, clearLocation };
 })();

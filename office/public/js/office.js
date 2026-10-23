@@ -6,15 +6,17 @@
   'use strict';
   const L = window.OfficeLayout;
   const K = window.PixelKit;
+  const DISPLAY = window.OfficeDisplayProfile ?? {external:false,textScale:1,catScale:1.1};
   const BG = window.OfficeBg;
-  const { ENTITY_SCALE: S, W, H, WALL_H, DY, DOOR_Y, DOOR_X, WINDOWS, KITCHEN, VCOUNTER, UCAB, LRUN, COFFEE, CL, FR, LED, CLOCK, BOOKS, BOARD, TITLE, NOTES, PINS, WALK_Y, PLANTS, PROPS } = L;
+  const { ENTITY_SCALE: S, W, H, WALL_H, DY, DOOR_Y, DOOR_X, WINDOWS, KITCHEN, VCOUNTER, UCAB, LRUN, COFFEE, CL, FR, FLOOR_LED, LED, CLOCK, BOOKS, BOARD, TITLE, NOTES, PINS, WALK_Y, PLANTS, PROPS } = L;
   const I = window.OfficeI18n;
   const FONT = '"Pixelify Sans", ui-monospace, monospace';
   const SFX = () => window.OfficeSfx || {};
   const SCREEN_LIGHT = { typing: '#7fa6ff', thinking: '#8f9cff', idle: '#4d5b9a', error: '#ff4f6d' };
   // How long each object reacts to a click (seconds); a second click during that time is ignored
-  const FX_DUR = { plant0: 1.3, plant1: 1.3, plant2: 1.3, plant3: 1.3, plant4: 1.3, coffee: 2.6, cooler: 1.8, fridge: 4.5, clock: 2.0, books: 1.6, door: 3.0, window0: 3.2, window1: 3.2, window2: 3.2, window3: 3.2 };
+  const FX_DUR = { plant0: 1.3, plant1: 1.3, plant2: 1.3, plant3: 1.3, plant4: 1.3, coffee: 2.6, cooler: 1.8, fridge: 4.5, clock: 2.0, books: 1.6, boardTap: 2, door: 3.0, window0: 3.2, window1: 3.2, window2: 3.2, window3: 3.2 };
   const WALK_SPEED = 62;
+  const CAT_SCALE = DISPLAY.catScale; // Leya is smaller than the office characters.
   const R = 2; // the scene buffer has twice the world resolution so 150% sprites keep an even pixel grid
 
   function polyLen(pts) {
@@ -68,7 +70,7 @@
       this.particles = [];
       this.fx = {};
       this.motes = Array.from({ length: 22 }, (_, i) => ({ seed: i * 7.31, w: i % WINDOWS.length }));
-      this.cat = { mode: 'sleep', home: { ...L.CAT_HOME }, x: L.CAT_HOME.x, y: L.CAT_HOME.y, t0: 0, target: null };
+      this.cat = window.OfficeCat.create(L.CAT_HOME);
       this.news = { articles: [], refreshing: false, error: null };
       this.weatherInfo = null; // { configured, weather } from /api/weather
       this.cli = 'claude'; // CLI used by the chats: shown by the red pin on the cork board
@@ -111,6 +113,7 @@
     setStatus(id, status, tag) {
       const s = this.st[id];
       if (!s) return;
+      window.OfficeScreens.setStatus(s.seed, status, this.t);
       s.status = status;
       if (tag) s.tag = tag;
     }
@@ -130,11 +133,11 @@
     ent(A, x, y) { const a = this.anchor(A); return { x: a.x + (x - a.x) * S, y: a.y + (y - a.y) * S }; }
     // inverse of ent(): a world point expressed in the unscaled drawing of the desk
     unent(A, x, y) { const a = this.anchor(A); return { x: a.x + (x - a.x) / S, y: a.y + (y - a.y) / S }; }
-    scaled(ax, ay, fn) {
+    scaled(ax, ay, fn, scale = S) {
       const b = this.b;
       b.save();
       b.translate(ax, ay);
-      b.scale(S, S);
+      b.scale(scale, scale);
       b.translate(-ax, -ay);
       fn();
       b.restore();
@@ -149,6 +152,8 @@
       for (const pl of PLANTS) rects.push([pl.x + 2, pl.y + 18, pl.x + 20, pl.y + 30]);
       rects.push([UCAB.x, UCAB.y, UCAB.x + UCAB.w, UCAB.y + UCAB.h], [VCOUNTER.x, VCOUNTER.y, VCOUNTER.x + VCOUNTER.w + 6, VCOUNTER.y + VCOUNTER.h], [LRUN.x, LRUN.y, LRUN.x + LRUN.w, LRUN.y + LRUN.h], [CL.x - 2, CL.y, CL.x + CL.w + 2, CL.y + CL.h]); // kitchen furniture
       rects.push([FR.x - 1, FR.y, FR.x + FR.w + 1, FR.y + FR.h]); // fridge
+      rects.push([282,332,318,350]); // Solid hearth; seat feet remain walkable.
+      for(const p of L.HEARTH.seats)rects.push([p.x-15,p.y-32,p.x+15,p.y-9]);
       this.nav = new window.OfficeNav(W, H, rects);
     }
 
@@ -163,8 +168,9 @@
     walkTo(id, dest, opts = {}) {
       const A = this.byId[id];
       if (!A || this.walks[id]?.cur || this.pinned.has(id)) return false;
-      const path = this.nav.path(this.side(A), dest);
-      this.walks[id] = { cur: { path, back: [...path].reverse(), phase: 'go', t0: this.t, len: polyLen(path), stay: opts.stay ?? 2, hold: !!opts.hold, pose: opts.pose || 'stand', target: opts.target || null, act: opts.act ?? null, kind: opts.kind || 'walk' } };
+      const path = this.nav.path(opts.from ?? this.side(A), dest);
+      const back=opts.backToDesk?this.nav.path(dest,this.side(A)):[...path].reverse();
+      this.walks[id] = { cur: { path, back, backLen:polyLen(back), phase: 'go', t0: this.t, len: polyLen(path), stay: opts.stay ?? 2, hold: !!opts.hold, pose: opts.pose || 'stand', target: opts.target || null, act: opts.act ?? null, kind: opts.kind || 'walk' } };
       return true;
     }
     release(id) {
@@ -178,8 +184,9 @@
     walkPos(c) {
       if (c.phase === 'stay') return { ...c.path[c.path.length - 1], moving: false, dx: 0 };
       const pts = c.phase === 'go' ? c.path : c.back;
-      const d = Math.min(c.len, (this.t - c.t0) * WALK_SPEED);
-      return { ...pointAt(pts, d), moving: d < c.len };
+      const length=c.phase==='back'?(c.backLen??polyLen(c.back)):c.len;
+      const d = Math.min(length, (this.t - c.t0) * WALK_SPEED);
+      return { ...pointAt(pts, d), moving: d < length };
     }
     posOf(id) { const c = this.walkerOf(id); return c ? this.walkPos(c) : null; }
     // somebody stands at this desk and talks to its owner (the owner turns around)
@@ -339,15 +346,15 @@
         const el = this.t - c.t0;
         if (c.phase === 'go' && el >= c.len / WALK_SPEED) { c.phase = 'stay'; c.t0 = this.t; this.walkEvent(id, 'arrive', c.act); }
         else if (c.phase === 'stay' && !c.hold && el >= c.stay) { c.phase = 'back'; c.t0 = this.t; }
-        else if (c.phase === 'back' && el >= c.len / WALK_SPEED) { w.cur = null; this.walkEvent(id, 'done', c.act); }
+        else if (c.phase === 'back' && el >= (c.backLen??polyLen(c.back)) / WALK_SPEED) { w.cur = null; this.walkEvent(id, 'done', c.act); }
       }
       if (this.sched.length) { const due = this.sched.filter((e) => e.at <= this.t); if (due.length) { this.sched = this.sched.filter((e) => e.at > this.t); for (const e of due) if (this.handlers.onSched) this.handlers.onSched(e.act); } }
       const pa = this.pinAnim;
       if (pa && pa.kind === 'lang' && pa.t0 != null && !pa.switched && this.t - pa.t0 >= pa.switchAt) { pa.switched = true; I.set(pa.to); }
+      if(pa&&['display','refresh','usage'].includes(pa.kind)&&pa.t0!=null&&!pa.switched&&this.t-pa.t0>=pa.switchAt){pa.switched=true;this.applyBoardAction(pa.kind,pa.to);}
       if (pa && ((pa.t0 != null && this.t - pa.t0 > pa.total + 0.5) || (pa.t0 == null && this.t - pa.created > 25))) {
-        if (pa.kind === 'cli') this.cli = pa.to; else this.locOn = pa.to;
+        if (pa.kind === 'cli') this.cli = pa.to; else if(pa.kind==='loc')this.locOn = pa.to; else if(['display','refresh','usage'].includes(pa.kind)&&!pa.switched)this.applyBoardAction(pa.kind,pa.to);
         this.pinAnim = null;
-      this.usage = null; // { available, providers: { claude, codex, antigravity } } from Agents Deck, via /api/usage
         if (pa.agentId) this.release(pa.agentId);
       }
       void dt;
@@ -366,19 +373,32 @@
       this.drawWallDynamic();
       this.drawPropFx();
       this.drawBoardNotes();
+      this.drawFloorCable();
+      this.drawFloorLed();
+      this.drawPowerPads();
+      this.drawNewsDeliverySlot();
+      this.kitchen?.drawBase();
+      this.fireplace?.drawRug();
       const ents = [];
-      for (const A of this.agents) ents.push({ y: A.y + this.deskSize(A).h, fn: () => this.drawStation(A) });
+      this.fireplace?.entities(ents);
+      for (const A of this.agents) ents.push({ y: A.y + this.deskSize(A).h, fn: () => {this.drawStation(A);this.kitchen?.drawDesk(A.id);if(!this.isAway(A.id)){this.kitchen?.drawActor(A.id);if(this.newsDelivery?.id===A.id)this.drawNewsDelivery();}} });
       PLANTS.forEach((pl, i) => ents.push({ y: pl.y + 28, fn: () => this.drawPlant(i) }));
-      ents.push({ y: this.cat.y + 9, fn: () => this.drawCat() });
+      ents.push({ y: this.cat.surface === 'counter' || this.cat.mode === 'jump' && this.cat.jump?.surface === 'counter' ? LRUN.y + LRUN.h + 3 : this.cat.y + 9, fn: () => this.drawCat() });
       ents.push({ y: FR.y + FR.h, fn: () => this.drawFridge() });
       ents.push({ y: LRUN.y + LRUN.h + 1, fn: () => this.drawDishes() });
-      for (const [id, w] of Object.entries(this.walks)) if (w.cur) ents.push({ y: this.walkPos(w.cur).y, fn: () => this.drawWalker(id, w.cur) });
+      for (const [id, w] of Object.entries(this.walks)) if (w.cur) ents.push({ y: this.walkPos(w.cur).y, fn: () => {this.drawWalker(id,w.cur);this.kitchen?.drawActor(id);if(this.newsDelivery?.id===id)this.drawNewsDelivery();} });
       ents.sort((a, c) => a.y - c.y);
       for (const e of ents) e.fn();
       this.drawPinFlight();
       this.drawParticles();
+      this.fireplace?.captureLight();
       this.drawLighting(dark);
+      this.fireplace?.drawLight();
       this.drawVignette();
+      this.drawFloorDisplayGlow(dark);
+      this.drawCableEmission();
+      this.drawCableConnectorLights();
+      this.drawBoardTapGlow();
 
       const ctx = this.ctx;
       const s = this.scale();
@@ -397,6 +417,7 @@
       this.drawLedText();
       this.drawBoardText();
       for (const A of [...this.agents].sort((a, c) => a.y - c.y)) this.drawLabel(A);
+      this.drawCatName();
       this.drawBubbles();
       this.updateZoomLabel();
     }
@@ -493,6 +514,204 @@
       this.P(LED.x, sy, LED.w, 1, 'rgba(60,207,142,0.07)');
     }
 
+    // Flush-mounted floor display: recessed wood lip, dark glass, no legs or raised enclosure.
+    pulseFloor() { if(this.floorDisplayActive)return; this.floorPulses = [...(this.floorPulses ?? []).filter(p => this.t - p.at < L.FLOOR_SIGNAL.total), { at: this.t }].slice(-6); }
+    floorCablePaths() {
+      const paths = [L.FLOOR_CABLE], a = this.byId['emrecan-cv#project'];
+      if (a) {
+        const size = this.deskSize(a), p = this.ent(a, a.x + size.w + 2, a.y + size.h);
+        const bottom = FLOOR_LED.y + FLOOR_LED.h + 3, endY = FLOOR_LED.y + FLOOR_LED.h - 12;
+        paths.push([[p.x, p.y], [p.x, bottom], [FLOOR_LED.x - 9, bottom], [FLOOR_LED.x - 9, endY], [FLOOR_LED.x - 1, endY]]);
+      }
+      return paths;
+    }
+    floorCablePoint(distance, path = L.FLOOR_CABLE) {
+      for (let i = 1; i < path.length; i++) {
+        const a = path[i - 1], b = path[i], length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (distance <= length) return { x: a[0] + (b[0] - a[0]) * distance / length, y: a[1] + (b[1] - a[1]) * distance / length };
+        distance -= length;
+      }
+      const p = path.at(-1); return { x: p[0], y: p[1] };
+    }
+    floorCablePorts(path){
+      const first=path[0];
+      return {inlet:{x:first[0],y:first[1]<WALL_H?WALL_H+3:first[1]+8},outlet:{x:path.at(-2)[0],y:path.at(-2)[1]}};
+    }
+    drawCableGrommet(x,y,horizontal=false,wide=false){
+      // Recessed gland: warm metal rim, dark opening, and a foreground lip over the cable.
+      const w=horizontal?6:wide?14:12,h=horizontal?8:5;
+      this.P(x-w/2-1,y+1,w+2,h/2+1,'rgba(25,16,24,.35)');
+      this.P(x-w/2,y-h/2,w,h,'#493b35');
+      this.P(x-w/2+1,y-h/2,w-2,1,'#b09b77');
+      this.P(x-w/2+1,y-h/2+1,w-2,h-2,'#776954');
+      if(horizontal){
+        this.P(x-1,y-2,3,4,'#101c23');this.P(x,y-1,3,2,'#345367');
+      }else{
+        this.P(x-3,y-1,6,2,'#111c25');this.P(x-1,y-1,2,2,'#6199a3');
+        this.P(x-w/2+2,y+1,w-4,1,'#a28c6a');
+      }
+    }
+    floorCableTransmission(distance, path) {
+      const length = path.slice(1).reduce((sum, p, i) => sum + Math.hypot(p[0] - path[i][0], p[1] - path[i][1]), 0);
+      const exposedStart = this.floorCablePorts(path).inlet.y-path[0][1];
+      const last = path.at(-1), before = path.at(-2), exposedEnd = Math.hypot(last[0] - before[0], last[1] - before[1]);
+      const surface = Math.max(Math.max(0, Math.min(1, (exposedStart - distance) / 6)), Math.max(0, Math.min(1, (distance - length + exposedEnd + 4) / 6)));
+      return .16 + .84 * surface;
+    }
+    drawCableConnectorLights() {
+      const b = this.b;
+      b.save(); b.globalCompositeOperation = 'screen';
+      for (const [index, path] of this.floorCablePaths().entries()) for (const [end, p] of [path[0], path.at(-1)].entries()) {
+        const wide = index === 1 && end === 0, radius = wide ? 17 : 11;
+        const glow = b.createRadialGradient(p[0], p[1], 0, p[0], p[1], radius);
+        glow.addColorStop(0, 'rgba(159,255,186,.8)'); glow.addColorStop(.2, 'rgba(61,237,130,.48)'); glow.addColorStop(1, 'rgba(32,190,93,0)');
+        b.fillStyle = glow; b.fillRect(p[0] - radius, p[1] - radius, radius * 2, radius * 2);
+        this.P(p[0] - (wide ? 3 : 1), p[1] - 1, wide ? 6 : 2, 2, '#a1ffbc');
+      }
+      b.restore();
+    }
+    drawFloorCable() {
+      const b = this.b;
+      for (const [index, path] of this.floorCablePaths().entries()) {
+      const ports=this.floorCablePorts(path);
+      // Only the exposed wall lead and display connector are visible. The floor run is buried.
+      for (const [width, color] of [[index === 1 ? 6 : 4, '#111b26'], [index === 1 ? 4 : 2, '#345367'], [index === 1 ? 2 : 1, '#6199a3']]) {
+        b.beginPath(); b.strokeStyle = color; b.lineWidth = width;
+        b.moveTo(...path[0]); b.lineTo(ports.inlet.x,ports.inlet.y);
+        b.moveTo(...path.at(-2)); b.lineTo(...path.at(-1)); b.stroke();
+      }
+      this.drawCableGrommet(ports.inlet.x,ports.inlet.y,false,index===1);
+      this.drawCableGrommet(ports.outlet.x,ports.outlet.y,true);
+      for (const [end, [x, y]] of [path[0], path.at(-1)].entries()) { const w = index === 1 && end === 0 ? 10 : 6; this.P(x - w / 2, y - 3, w, 6, '#162c37'); this.P(x - w / 2 + 1, y - 2, w - 2, 4, '#709b85'); this.P(x - 1, y - 1, 2, 2, '#334d60'); }
+      }
+    }
+    drawPowerPads(){
+      const b=this.b;
+      for(const [key,pad] of Object.entries(L.FLOOR_POWER_PADS)){
+        const pressed=this.floorPowerJump?.on===(key==='on')&&this.t-this.floorPowerJump.at>=1&&this.t-this.floorPowerJump.at<1.25,dy=pressed?1:0;
+        this.P(pad.x,pad.y+2,pad.w,pad.h,'#101c20');this.P(pad.x,pad.y+dy,pad.w,pad.h-2,key==='on'?'#486953':'#754c46');this.P(pad.x+1,pad.y+dy,pad.w-2,1,'#98ab9b');
+        b.save();b.font=`400 4px ${FONT}`;b.textAlign='center';b.fillStyle='#e1eee1';b.fillText(key.toUpperCase(),pad.x+pad.w/2,pad.y+5+dy);b.restore();
+      }
+    }
+    drawFloorDisplayGlow(dark) {
+      if (!this.floorDisplayActive) return;
+      const b = this.b, f = FLOOR_LED, strength = .12 + Math.min(1, dark * 2) * .18;
+      b.save(); b.globalCompositeOperation = 'screen';
+      // Light only the surrounding parquet; the HTML display and sprite layers retain their own pixels.
+      b.beginPath(); b.rect(f.x - 22, f.y - 22, f.w + 44, f.h + 44); b.rect(f.x, f.y, f.w, f.h); b.clip('evenodd');
+      b.shadowColor = `rgba(87,215,232,${strength * 1.6})`;
+      b.shadowBlur = 14 * R; b.lineWidth = 3;
+      b.strokeStyle = `rgba(123,232,242,${strength})`;
+      b.beginPath(); b.roundRect(f.x, f.y, f.w, f.h, 3);
+      for (let pass = 0; pass < 3; pass++) b.stroke();
+      b.restore();
+    }
+    drawCableEmission() {
+      const b = this.b, signal = L.FLOOR_SIGNAL;
+      this.floorPulses = (this.floorPulses ?? []).filter(p => this.t - p.at < signal.total);
+      if (!this.floorPulses.length) return;
+      const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      b.save(); b.globalCompositeOperation = 'screen';
+      const halo = (x, y, radius, strength) => {
+        const glow = b.createRadialGradient(x, y, 0, x, y, radius);
+        glow.addColorStop(0, `rgba(195,255,255,${strength})`);
+        glow.addColorStop(.2, `rgba(62,227,255,${strength * .8})`);
+        glow.addColorStop(.55, `rgba(28,170,245,${strength * .35})`);
+        glow.addColorStop(1, 'rgba(20,130,220,0)');
+        b.fillStyle = glow; b.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+      };
+      for (const path of this.floorCablePaths()) {
+      const length = path.slice(1).reduce((sum, p, i) => sum + Math.hypot(p[0] - path[i][0], p[1] - path[i][1]), 0);
+      for (const pulse of this.floorPulses) {
+        const age = this.t - pulse.at;
+        if (age < 0) continue;
+        const head = Math.min(1, age / signal.travel) * length;
+        const burst = Math.max(0, 1 - age / .9);
+        halo(...path[0], 30, reduced ? .55 : .95 * burst);
+        if (!reduced && age < signal.travel) {
+          for (let tail = 80; tail >= 0; tail -= 7) {
+            const distance = head - tail; if (distance < 0) continue;
+            const p = this.floorCablePoint(distance, path), transmission = this.floorCableTransmission(distance, path), strength = (1 - tail / 90) * .38 * transmission;
+            halo(p.x, p.y, 8 + transmission * 5, strength);
+            // Interrupted fine highlights let the parquet grain remain legible over the buried fiber.
+            if (Math.floor(p.y) % 9 !== 0) this.P(Math.round(p.x) - 1, Math.round(p.y), transmission > .5 ? 3 : 1, 1, `rgba(151,252,255,${(1 - tail / 90) * transmission})`);
+          }
+          const p = this.floorCablePoint(head, path), transmission = this.floorCableTransmission(head, path);
+          halo(p.x, p.y, 10 + transmission * 12, .85 * transmission);
+          if (transmission > .5) this.P(Math.round(p.x) - 1, Math.round(p.y) - 1, 3, 3, `rgba(240,255,255,${transmission})`);
+        }
+        if (reduced || age >= signal.travel) {
+          const fade = reduced ? .65 : Math.max(0, 1 - (age - signal.travel) / signal.linger);
+          halo(...path.at(-1), 32, fade);
+          this.P(path.at(-1)[0] - 1, path.at(-1)[1] - 2, 2, 4, '#e5ffff');
+        }
+      }
+      }
+      b.restore();
+    }
+    drawFloorLed(faceOnly = false) {
+      const { x, y, w, h } = FLOOR_LED;
+      const b = this.b;
+      if (!faceOnly) {
+        this.P(x - 3, y - 3, w + 6, h + 6, '#54392e');
+        this.P(x - 2, y - 2, w + 4, h + 4, '#241d20');
+        this.P(x - 3, y - 3, w + 6, 1, '#36251f');
+        this.P(x - 3, y + h + 2, w + 6, 1, '#ad7951');
+        for (const xx of [x - 1, x + w]) for (const yy of [y - 1, y + h]) this.P(xx, yy, 1, 1, '#84796b');
+      }
+      this.P(x, y, w, h, '#101e27');
+      for (let yy = y + 1; yy < y + h; yy += 3) this.P(x, yy, w, 1, '#12232c');
+      this.P(x + 1, y + 1, w - 2, 1, '#2e4b53');
+      if(!this.floorDisplayActive)return;
+      this.P(x + 7, y + 10, 2, 2, '#81baa8');
+      this.P(x + 8, y + 23, w - 16, 1, '#27404a');
+      // A narrow reflection on protective glass; no bright pool at the beam's end.
+      this.P(x + w - 35, y + 2, 30, 1, '#31424b');
+      this.P(x + w - 25, y + 3, 20, 1, '#25363e');
+      b.save();
+      b.beginPath(); b.rect(x + 5, y + 4, w - 10, h - 8); b.clip();
+      b.textAlign = 'left'; b.textBaseline = 'alphabetic';
+      for (const [key, yy, size, color] of [
+        ['floorLed.title', 13, 6, '#85b9ac'], ['floorLed.waiting', Math.round(h * 0.48), 9, '#c2caca'],
+        ['floorLed.detail', Math.round(h * 0.48) + 14, 6, '#8c9da8'], ['floorLed.note', h - 9, 5, '#738c97'],
+      ]) {
+        b.font = `400 ${size}px ${FONT}`; b.fillStyle = color;
+        b.fillText(I.t(key), x + (yy === 13 ? 13 : 8), y + yy, w - 20);
+      }
+      b.restore();
+    }
+    drawFloorEmission(on) {
+      if(!this.floorDisplayActive)return;
+      const b = this.b, f = FLOOR_LED;
+      if (!this._floorEmission) {
+        const canvas = document.createElement('canvas'); canvas.width = f.w * R; canvas.height = f.h * R;
+        this._floorEmission = canvas;
+      }
+      const layer = this._floorEmission, g = layer.getContext('2d');
+      g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, layer.width, layer.height);
+      g.setTransform(R, 0, 0, R, -f.x * R, -f.y * R); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.imageSmoothingEnabled = false;
+      // Cut out actual opaque sprite pixels, preserving the lit glass around whiskers and paws.
+      // Bounding rectangles left visible dark boxes when Leya lay on the screen.
+      this.b = g;
+      try {
+        this.drawFloorLed(true);
+        g.globalCompositeOperation = 'destination-out';
+        this.drawCat();
+        for (const [id, walk] of Object.entries(this.walks)) if (walk.cur) {this.drawWalker(id,walk.cur);this.kitchen?.drawActor(id);if(this.newsDelivery?.id===id)this.drawNewsDelivery();}
+      } finally { this.b = b; }
+      b.save(); b.globalCompositeOperation = 'source-over'; b.globalAlpha = 0.62 * on;
+      b.drawImage(layer, f.x, f.y, f.w, f.h);
+      b.globalAlpha = 1; b.globalCompositeOperation = 'lighter';
+      for (const yy of [f.y - 1, f.y + f.h + 1]) {
+        const glow = b.createLinearGradient(0, yy - 3, 0, yy + 3);
+        glow.addColorStop(0, 'rgba(100,170,180,0)');
+        glow.addColorStop(0.5, `rgba(100,170,180,${0.08 * on})`);
+        glow.addColorStop(1, 'rgba(100,170,180,0)');
+        b.fillStyle = glow; b.fillRect(f.x, yy - 3, f.w, 6);
+      }
+      b.restore();
+    }
+
     // ---------- desk + character ----------
     drawStation(A) { const a = this.anchor(A); this.scaled(a.x, a.y, () => this.drawStationInner(A)); }
     drawStationInner(A) {
@@ -510,16 +729,18 @@
       this.blit(this.spr('monitor', () => K.monitor()), mx - 1, my - 1);
       this.drawScreen(A, st, mx + 2, my + 2, 20, 11);
       this.blit(this.spr('keyboard', () => K.keyboard()), mx + 4, y + 2);
-      const [il, ir] = A.items;
-      const Li = this.spr('item-' + il, () => K.ITEMS[il]());
-      const Ri = this.spr('item-' + ir, () => K.ITEMS[ir]());
-      this.blit(Li, x + 1, y + 4 - Li.height + 2);
-      this.blit(Ri, x + w - Ri.width + 1, y + 4 - Ri.height + 2);
+      // Leave the left edge free for the actual drink; decorations share the right edge.
+      for (const [i,item] of A.items.filter(item=>item!=='mug').entries()) {
+        const prop=this.spr('item-'+item,()=>K.ITEMS[item]());
+        this.blit(prop,x+w-prop.width+1-i*12,y+6-prop.height);
+      }
       if (A.big) this.blit(this.spr('item-nameplate', () => K.ITEMS.nameplate()), x + w / 2 - 7, y + 9);
 
       const chair = this.spr('chair', () => K.chair());
       if (this.isAway(A.id)) { this.blit(chair, sx - 9, y + 3); return; }
-      if (this.talkedTo(A.id) || (this.cat.target === A.id && this.cat.mode === 'rub')) {
+      const workflow = st.workflow && this.applicationWorkflow;
+      if (workflow) window.OfficeWorkflow.props(this, A, workflow);
+      if (this.talkedTo(A.id) || (this.cat.target === A.id && this.cat.mode === 'rub' && !this.pinned.has(A.id) && st.status === 'idle')) {
         // a visitor stands at the desk: the owner turns around and listens
         this.blit(chair, sx - 9, y + 3);
         const fy = y + 20;
@@ -527,10 +748,12 @@
         this.blit(this.spr(`${A.id}:stand`, () => K.front(A.look, 'stand')), sx - 6 - K.OX, fy - 23 - K.OY);
         return;
       }
+      const drinkArm = this.kitchen?.usesArm(A.id) ?? false;
       const typing = status === 'typing';
-      const f = typing ? Math.floor(t * 9 + st.seed) % 2 : 0;
+      const wf = workflow && window.OfficeWorkflow.frame(workflow, t);
+      const f = typing ? Math.floor(t * (wf ? [3, 5, 2][wf.variant] : 9) + st.seed) % 2 : 0;
       const breathe = !typing && Math.floor(t * 1.2 + st.seed) % 2 ? 1 : 0;
-      this.blit(this.spr(`${A.id}:back${f}`, () => K.back(A.look, f)), sx - 6 - K.OX, y - 6 - K.OY + breathe);
+      this.blit(wf ? this.spr(`${A.id}:work:${wf.phase}:${wf.variant}:${wf.beat}`, () => K.work(A.look, wf.phase, wf.variant, wf.beat)) : this.spr(`${A.id}:back${f}:${drinkArm}`, () => K.back(A.look, f, drinkArm)), sx - 6 - K.OX, y - 6 - K.OY + breathe);
       this.blit(chair, sx - 9, y + 3);
       if (status === 'error') this.alertIcon(sx, y - 30 - Math.abs(Math.sin(t * 6)) * 3, '#ff3d5e');
       if (status === 'thinking') this.thoughtCloud(sx + 4, y - 24, Math.floor(t * 2.5) % 4);
@@ -555,7 +778,17 @@
       const t = this.t;
       const status = st.status;
       const P = (xx, yy, ww, hh, c) => this.P(x + xx, y + yy, ww, hh, c);
-      if (status === 'idle') { window.OfficeScreens.draw(P, Math.floor(st.seed), t); return; }
+      if (st.workflow && this.applicationWorkflow) { window.OfficeWorkflow.screen(P, this.applicationWorkflow, t); return; }
+      if (A.kind === 'news' && this.newsSession?.status === 'preparing') {
+        // The actual news job has its own screen; idle entertainment never replaces active work.
+        P(0, 0, w, h, '#142637'); P(0, 0, w, 1, '#416b8c');
+        P(1, 2, 5, 5, '#8da9bd'); P(2, 3, 3, 1, '#d5e3eb');
+        P(7, 2, 10, 1, '#94b9ce'); P(7, 4, 8, 1, '#6e94ac'); P(7, 6, 10, 1, '#6e94ac');
+        P(1, 9, w - 2, 1, '#30465b');
+        P(1, 9, Math.round((w - 2) * Math.min(100, Math.max(0, this.newsSession.progress?.percent ?? 0)) / 100), 1, '#8dd3ba');
+        P(18, 2 + Math.floor(t * 2) % 5, 1, 1, '#b4ccda'); return;
+      }
+      if (status === 'idle') { window.OfficeScreens.draw(P, st.seed, t); return; }
       if (status === 'error') {
         P(0, 0, w, h, Math.floor(t * 4) % 2 ? '#5a0f22' : '#7a1430');
         for (let i = 0; i < 5; i++) { P(7 + i, 3 + i, 2, 1, '#ffd0d8'); P(11 - i, 3 + i, 2, 1, '#ffd0d8'); }
@@ -578,19 +811,39 @@
     }
 
     // ---------- walkers ----------
-    drawWalker(id, c) { const p = this.walkPos(c); this.scaled(Math.round(p.x), Math.round(p.y), () => this.drawWalkerInner(id, c)); }
+    powerJump(id) {
+      const jump=this.floorPowerJump;if(!jump||jump.id!==id)return null;
+      const age=Math.max(0,this.t-jump.at);
+      if(age<.12)return {dx:0,lift:0,squash:Math.sin(Math.PI*age/.12)*2};
+      if(age<1){const flight=(age-.12)/.88;return {dx:12*flight,lift:Math.sin(Math.PI*flight)*15,squash:0};}
+      if(age<1.25)return {dx:12,lift:0,squash:Math.sin((age-1)*Math.PI*4)*2};
+      const back=Math.min(1,(age-1.25)/.65);return {dx:12*(1-back),lift:Math.sin(Math.PI*back)*5,squash:0};
+    }
+    drawWalker(id, c) {
+      const p=this.walkPos(c),jump=this.powerJump(id),b=this.b;
+      if(jump)this.shadow(p.x+jump.dx,p.y,6-jump.lift*.1,1.5,.3-jump.lift*.008);
+      b.save();if(jump){b.translate(jump.dx,-jump.lift);b.translate(p.x,p.y);b.scale(1+jump.squash*.03,1-jump.squash*.06);b.translate(-p.x,-p.y);}
+      this.scaled(Math.round(p.x),Math.round(p.y),()=>this.drawWalkerInner(id,c));b.restore();
+    }
     drawWalkerInner(id, c) {
       const A = this.byId[id];
       if (!A) return;
       const p = this.walkPos(c);
       const lift = p.moving && Math.floor(this.t * 8) % 2 ? 1 : 0;
-      this.shadow(p.x, p.y, 6, 1.5, 0.35);
+      if(!this.powerJump(id))this.shadow(p.x, p.y, 6, 1.5, 0.35);
+      const drinkArm = this.kitchen?.usesArm(id) ?? false;
       const x = p.x - 6 - K.OX;
       const y = p.y - 23 - K.OY - lift;
-      if (p.moving) {
+      if(this.powerJump(id)?.lift>2){
+        this.blit(this.spr(`${id}:powerjump`,()=>K.front(A.look,'cheer')),x,y);
+      } else if (p.moving) {
         const f = Math.floor(this.t * 8) % 4;
-        const img = this.spr(`${id}:walk${f}`, () => K.front(A.look, 'walk', f));
-        if (p.dx < 0) this.blitFlip(img, x, y); else this.blit(img, x, y);
+        const img = this.spr(`${id}:walk${f}:${drinkArm}`, () => K.front(A.look, 'walk', f, drinkArm));
+        if (p.dx < 0 && !drinkArm) this.blitFlip(img, x, y); else this.blit(img, x, y);
+      } else if(c.pose==='lounge'){
+        const pet=this.fireplace?.petting(id),settle=Math.min(1,Math.max(0,(this.t-c.t0)/.65));
+        const frame=Math.floor(this.t*2)%2,pose=pet?'pet-seat':this.speaking(id)?'lounge-talk':this.fireplace?.relaxing(id)?'lounge-stretch':'lounge';
+        this.blit(this.spr(`${id}:${pose}:${frame}`,()=>K.front(A.look,pose,frame)),x,y+3*settle);
       } else if (c.pose === 'back') {
         this.blit(this.spr(`${id}:standback`, () => standBack(A.look)), x, y);
       } else if (c.pose === 'mug') {
@@ -600,51 +853,49 @@
           const k = ((this.t * 0.7 + i * 0.5) % 1);
           this.P(p.x + 6 + Math.sin(this.t * 3 + i) * 1, p.y - 15 - k * 7, 1, 1, `rgba(255,255,255,${0.55 * (1 - k)})`);
         }
-      } else this.blit(this.spr(`${id}:stand`, () => K.front(A.look, 'stand')), x, y);
+      } else this.blit(this.spr(`${id}:stand:${drinkArm}`, () => K.front(A.look, 'stand', 0, drinkArm)), x, y);
+    }
+
+    drawDisk(x, y, shrink = 1) {
+      if (shrink <= 0) return;
+      this.P(x, y, Math.max(1, 7 * shrink), 7, '#718fa8');
+      this.P(x + 1, y + 1, Math.max(1, 5 * shrink), 2, '#d8edf0');
+      this.P(x + 2, y + 4, Math.max(1, 3 * shrink), 2, '#23374c');
+    }
+    drawNewsDeliverySlot() {
+      const slot = { x: LED.x + LED.w / 2, y: LED.y + LED.h + 4 };
+      this.P(slot.x - 6, slot.y, 12, 4, '#192a32');
+      this.P(slot.x - 5, slot.y + 1, 9, 1, '#070f19');
+      this.P(slot.x + 4, slot.y + 1, 1, 1, this.newsDelivery ? '#82d8ac' : '#496776');
+    }
+    drawNewsDelivery() {
+      const slot={x:LED.x+LED.w/2,y:LED.y+LED.h+4};
+      const d = this.newsDelivery;
+      if (!d || !this.byId[d.id]) return;
+      const a = this.byId[d.id];
+      if (d.stage === 'pickup') {
+        const q = Math.min(1, (this.t - d.at) / 1.8);
+        const an = this.anchor(a);
+        this.scaled(an.x, an.y, () => {
+          const x = a.x + this.deskSize(a).w / 2 + 16 - q * 8;
+          const y = a.y - 8 + q * 12;
+          this.P(x - 3, y + 5, 6, 3, a.look.skin);
+          this.drawDisk(x, y);
+        });
+      } else {
+        const pos = this.posOf(d.id);
+        if (!pos) return;
+        const q = d.stage === 'carry' ? 0 : Math.min(1, (this.t - d.at) / 1.6);
+        const x = (pos.x + 9) * (1 - q) + (slot.x - 3) * q;
+        const y = (pos.y - 21) * (1 - q) + (slot.y - 2) * q;
+        this.P(x - 2, y + 6, 5, 3, a.look.skin);
+        this.drawDisk(x, y, q > 0.75 ? (1 - q) * 4 : 1);
+        if (q > 0.8) this.P(slot.x - 4, slot.y + 1, 8 * Math.min(1, (this.t - d.at - 1.3) / 0.9), 1, '#7ec6a3');
+      }
     }
 
     // ---------- cat ----------
-    catUpdate() {
-      const c = this.cat;
-      const SPEED = 38;
-      const el = this.t - c.t0;
-      if (c.mode === 'wake' && el > 1.3) {
-        const pool = this.agents.filter((A) => !this.isAway(A.id));
-        const A = pool[Math.floor(Math.random() * pool.length)];
-        if (!A) { c.mode = 'sleep'; return; }
-        const { h } = this.deskSize(A);
-        c.target = A.id;
-        c.from = { x: c.x, y: c.y };
-        c.to = this.ent(A, this.seatX(A) - 26, A.y + h + 3);
-        c.len = Math.hypot(c.to.x - c.from.x, c.to.y - c.from.y);
-        c.mode = 'walk';
-        c.t0 = this.t;
-      } else if (c.mode === 'walk' || c.mode === 'return') {
-        const k = Math.min(1, (el * SPEED) / Math.max(1, c.len));
-        c.x = c.from.x + (c.to.x - c.from.x) * k;
-        c.y = c.from.y + (c.to.y - c.from.y) * k;
-        c.face = c.to.x >= c.from.x ? 1 : -1;
-        if (k >= 1) {
-          if (c.mode === 'walk') {
-            c.mode = 'rub';
-            c.t0 = this.t;
-            if (SFX().purr) SFX().purr();
-            const lines = I.lang === 'en' ? ['Here, kitty!', 'Aww, look who came!', 'Break time?', 'Want coffee too?'] : ['Pisi pisi!', 'Aww, kim gelmiş?', 'Mola zamanı mı?', 'Sen de mi kahve istiyorsun?'];
-            if (c.target && this.byId[c.target]) { this.say(c.target, lines[Math.floor(Math.random() * lines.length)], { duration: 2.6, fill: '#ffe1ea', shade: '#f0b8c8' }); this.hearts(c.x + 8, c.y - 2, 4); }
-          } else { c.mode = 'sleep'; c.x = c.home.x; c.y = c.home.y; }
-        }
-      } else if (c.mode === 'rub') {
-        if (Math.floor(el * 2.5) !== Math.floor((el - 0.05) * 2.5)) this.hearts(c.x + 8, c.y - 1, 1);
-        if (el > 2.6) {
-          c.from = { x: c.x, y: c.y };
-          c.to = { ...c.home };
-          c.len = Math.hypot(c.to.x - c.from.x, c.to.y - c.from.y);
-          c.mode = 'return';
-          c.t0 = this.t;
-          c.target = null;
-        }
-      }
-    }
+    catUpdate() { window.OfficeCat.update(this); }
     hearts(x, y, n) {
       for (let i = 0; i < n; i++) this.particles.push({ kind: 'heart', x: x + (Math.random() - 0.5) * 10, y, life: 1.6, born: this.t + i * 0.15 });
     }
@@ -653,12 +904,13 @@
       const walks = {};
       for (const [id, w] of Object.entries(this.walks)) if (w.cur) walks[id] = w.cur;
       return {
-        t: this.t, wall: Date.now(), walks, sched: this.sched, pinAnim: this.pinAnim, fx: this.fx, cat: this.cat, led: this.led, dishes: this.dishes,
+        displayMode:DISPLAY.external, t: this.t, wall: Date.now(), walks, sched: this.sched, pinAnim: this.pinAnim, fx: this.fx, cat: this.cat, screens: window.OfficeScreens.snapshot(), led: this.led, floorPulses: this.floorPulses ?? [], floorPowerJump: this.floorPowerJump ?? null, dishes: this.dishes,
         bubbles: this.bubbles.filter((b) => b.until > this.t).map((b) => ({ id: b.id, text: b.text, until: b.until, fill: b.fill, shade: b.shade, source: b.source, thread: b.thread, act: b.act, at: b.at })),
         particles: this.particles.filter((p) => this.t - p.born < p.life).slice(-60), cam: { ...this.cam }, st: Object.fromEntries(Object.entries(this.st).map(([k, v]) => [k, { seed: v.seed }])),
       };
     }
     restore(snap) {
+      if(typeof snap?.displayMode==='boolean')DISPLAY.setEnabled(snap.displayMode);
       if (!snap || !Number.isFinite(snap.t) || !Number.isFinite(snap.wall)) return false;
       const gap = (Date.now() - snap.wall) / 1000;
       if (gap > 90 || gap < 0) return false; // too old: start a fresh moment instead of a frozen one
@@ -669,13 +921,17 @@
       for (const [id, cur] of Object.entries(snap.walks ?? {})) if (this.byId[id]) this.walks[id] = { cur };
       this.sched = snap.sched ?? [];
       this.pinAnim = snap.pinAnim ?? null;
+      this.floorPowerJump=snap.floorPowerJump??null;
       this.fx = snap.fx ?? {};
+      this.floorPulses = (snap.floorPulses ?? []).filter(p => Number.isFinite(p.at) && this.t - p.at < L.FLOOR_SIGNAL.total).slice(-6);
       if (snap.cat) Object.assign(this.cat, snap.cat);
       if (snap.led) Object.assign(this.led, snap.led);
       this.dishes = snap.dishes ?? [];
       this.bubbles = (snap.bubbles ?? []).filter((b) => b.until > this.t && (b.at || this.byId[b.id]));
       this.particles = snap.particles ?? [];
       for (const [id, v] of Object.entries(snap.st ?? {})) if (this.st[id] && Number.isFinite(v.seed)) this.st[id].seed = v.seed;
+      window.OfficeScreens.restore(snap.screens);
+      for (const A of this.agents) window.OfficeScreens.setStatus(this.st[A.id].seed, this.st[A.id].status, this.t);
       if (snap.cam) { this.cam = { ...snap.cam }; this.clampCam(); }
       return true;
     }
@@ -689,12 +945,13 @@
     }
     removeDish() { if (this.dishes.length) this.dishes.sort((a, b) => b.slot - a.slot).shift(); }
     drawDishes() {
-      const cols = ['#e2445c', '#4fa8ff', '#f3eee6', '#e8a33c'];
+      const cols = window.OfficeKitchen?.colors??['#e2445c','#4fa8ff','#f3eee6','#e8a33c'];
       for (const d of this.dishes) {
+        if(d.held)continue;
         const { x, y } = this.dishSlot(d.slot);
         const drop = Math.max(0, 1 - (this.t - d.born) / 0.25) * 5; // lands with a tiny drop
         const yy = Math.round(y - drop);
-        if (d.kind === 'mug') { this.P(x, yy + 3, 6, 1, 'rgba(30,18,10,0.35)'); this.P(x, yy - 1, 5, 4, cols[d.tone]); this.P(x, yy - 1, 5, 1, K.tone(cols[d.tone], 0.4)); this.P(x + 5, yy, 1, 2, '#d9d2c4'); this.P(x + 1, yy, 3, 1, '#5a3a26'); }
+        if (d.kind === 'mug') { this.P(x, yy + 3, 6, 1, 'rgba(30,18,10,0.35)'); this.P(x, yy - 1, 5, 4, cols[(d.tone??0)%cols.length]); this.P(x, yy - 1, 5, 1, K.tone(cols[(d.tone??0)%cols.length], 0.4)); this.P(x + 5, yy, 1, 2, '#d9d2c4'); this.P(x + 1, yy, 3, 1, '#5a3a26'); }
         else if (d.kind === 'glass') { this.P(x, yy + 3, 5, 1, 'rgba(30,18,10,0.3)'); this.P(x, yy - 3, 4, 6, 'rgba(190,225,245,0.85)'); this.P(x, yy - 3, 1, 6, '#f0fbff'); this.P(x + 1, yy + 1, 2, 2, 'rgba(120,170,205,0.9)'); }
         else { this.P(x, yy + 3, 9, 1, 'rgba(30,18,10,0.3)'); this.P(x, yy, 9, 3, '#f4f1ea'); this.P(x + 1, yy, 7, 1, '#ffffff'); this.P(x + 3, yy, 3, 2, '#c9824a'); this.P(x + 2, yy + 1, 1, 1, '#7fc47a'); }
       }
@@ -728,43 +985,43 @@
       this.P(x + 1, top, dw, bh, '#c9d0d8'); this.P(x + 1, top, dw, 1, '#eef1f5'); this.P(x + dw - 1, top, 2, bh, '#a9b2bd');
       if (dw > 12) { this.P(x + dw - 6, top + 7, 2, 16, '#7c8591'); }
     }
-    drawCat() { const c = this.cat; this.scaled(Math.round(c.x + 9), Math.round(c.y + 10), () => this.drawCatInner()); }
+    drawCat() { const c = this.cat; this.scaled(Math.round(c.x + 9), Math.round(c.y + 10), () => this.drawCatInner(), CAT_SCALE); }
     drawCatInner() {
-      const c = this.cat;
-      if (c.mode !== 'sleep') {
-        const t = this.t;
-        if (c.mode === 'walk' || c.mode === 'return') {
-          const f = Math.floor(t * 9) % 4;
-          const img = this.spr('catwalk' + f, () => K.catWalk(f));
-          this.shadow(c.x + 9, c.y + 9, 8, 1.5, 0.3);
-          if (c.face < 0) this.blitFlip(img, c.x, c.y - 1); else this.blit(img, c.x, c.y - 1);
-        } else {
-          const meow = c.mode === 'wake' && t - c.t0 < 0.7;
-          const wig = c.mode === 'rub' ? Math.round(Math.sin(t * 8)) : 0;
-          const stretch = c.mode === 'wake' && t - c.t0 < 0.25 ? 2 : 0;
-          this.shadow(c.x + 7, c.y + 9, 6, 1.5, 0.3);
-          this.blit(this.spr('catsit' + (meow ? 1 : 0), () => K.catSit(meow ? 1 : 0)), c.x + wig, c.y - 4 + stretch);
-        }
-        return;
+      const c = this.cat, age = this.t - c.t0;
+      const moving = ['walk', 'return', 'wander', 'chase', 'counter-walk'].includes(c.mode);
+      const poses = { 'window-watch': 'watch', 'window-listen': 'watch', 'counter-look': 'look', 'counter-rest': 'groom', 'floor-look': 'look', 'floor-settle': 'stretch', 'floor-knead': 'knead', 'floor-nap': 'sleep', 'control-ready':'crouch','control-land':'play', jump: 'jump' };
+      const mode = moving ? 'walk' : poses[c.mode] ?? c.mode;
+      const frame = Math.floor(age * (moving ? 6 : 2)) % 8;
+      const hop = (c.lift ?? 0) / CAT_SCALE + (c.mode === 'chase' ? Math.max(0, Math.sin(age * 8)) * 2 : 0);
+      this.shadow(c.x + 9, c.y + 9, c.mode === 'roll' ? 10 : 8, 1.6, 0.3);
+      if (c.toy) {
+        const dx = c.mode === 'play' ? Math.sin(age * 4) * 4 : 0;
+        // The little felt ball belongs to Leya; it is only out during play.
+        this.P(c.toy.x + dx - 2, c.toy.y - 2, 4, 3, '#a895be');
+        this.P(c.toy.x + dx - 1, c.toy.y - 2, 2, 1, '#d2c5dd');
       }
-      const f = Math.floor(this.t * 1.3) % 2;
-      this.shadow(c.x + 9, c.y + 9, 9, 1.5, 0.3);
-      this.blit(this.spr('cat' + f, () => K.cat(f)), c.x, c.y);
-      const k = (this.t * 0.4) % 1;
-      if (k < 0.7) {
-        const zx = c.x + 16 + k * 6;
-        const zy = c.y - 2 - k * 10;
-        const col = `rgba(230,225,255,${1 - k / 0.7})`;
-        this.P(zx, zy, 3, 1, col); this.P(zx + 1, zy + 1, 1, 1, col); this.P(zx, zy + 2, 3, 1, col);
+      this.blit(this.spr(`leya:${mode}:${frame}:${c.face ?? 1}`, () => K.catPose(mode, frame, c.face ?? 1)), c.x - 4, c.y - 13 - hop);
+      if (mode === 'sleep' && age % 4 < 2.6) {
+        const q = (age % 4) / 4;
+        this.P(c.x + 17 + q * 5, c.y - 7 - q * 8, 2, 1, `rgba(192,203,221,${0.7 - q})`);
       }
     }
-    poke() {
-      if (this.cat.mode !== 'sleep') return;
-      this.cat.mode = 'wake';
-      this.cat.t0 = this.t;
-      if (SFX().meow) SFX().meow();
-      this.hearts(this.cat.x + 9, this.cat.y - 4, 3);
+    // Leya's name plate: the same plate style and text size as every desk label
+    drawCatName() {
+      const [cx, top] = this.scr(this.cat.x + 9, this.cat.y + 16);
+      if (!this.inView(cx, top)) return;
+      const u = this.u;
+      const fs = this.fontDev(5.8, 9);
+      const label = I.t('cat.label');
+      const tw = this.measureD(label, fs, 600);
+      const lh = Math.round(fs + 3 * u);
+      const total = Math.round(tw + 6 * u);
+      const x0 = Math.round(cx - total / 2);
+      this.boxD(x0, top, total, lh, '#1e1828', '#0e0a14', '#15111d');
+      this.rectD(x0 + u, top + u, total - 2 * u, u, '#2f2740');
+      this.textD(label, x0 + 3 * u, top + lh - 2 * u, { color: '#efe9f7', weight: 600, font: fs });
     }
+    poke() { window.OfficeCat.poke(this); }
 
     // ---------- plants ----------
     drawPlant(i) {
@@ -945,6 +1202,7 @@
       if (dark > 0) { b.fillStyle = `rgba(10,9,34,${Math.min(0.9, dark * 1.5)})`; b.fillRect(0, 0, W, H); }
       else { b.fillStyle = 'rgba(255,246,222,0.08)'; b.fillRect(0, 0, W, H); } // daylight fills the room
       if (on <= 0 && moon <= 0) return;
+      this.drawFloorEmission(on);
       const lights = [], cones = [];
       for (const A of this.agents) {
         const st = this.st[A.id];
@@ -953,7 +1211,7 @@
         // coloured and scaled by what is on the screen, plus a small bloom on the bezel
         const mx = A.x + Math.round(w / 2) - 5, my = A.y - 18;
         const e0 = this.ent(A, mx + 2, my + 13), e1 = this.ent(A, mx + 22, my + 13), ec = this.ent(A, mx + 12, my + 8);
-        const sl = st.status === 'idle' ? window.OfficeScreens.tint(Math.floor(st.seed), this.t) : { color: SCREEN_LIGHT[st.status] || SCREEN_LIGHT.typing, strength: st.status === 'error' ? 0.5 : 0.4 };
+        const sl = st.status === 'idle' ? window.OfficeScreens.tint(st.seed, this.t) : { color: SCREEN_LIGHT[st.status] || SCREEN_LIGHT.typing, strength: st.status === 'error' ? 0.5 : 0.4 };
         const str = Math.max(0.45, sl.strength * 0.8); // dim scenes still light the desk
         cones.push({ x0: e0.x, x1: e1.x, y: e0.y, depth: 34 * S, spread: 9 * S, color: sl.color, alpha: 0.34 * str * on });
         lights.push({ x: ec.x, y: ec.y + 4 * S, r: 18 * S, c: sl.color, a: 0.18 * str * on });
@@ -1061,7 +1319,7 @@
 
     // ---------- screen-resolution layer ----------
     scr(wx, wy) { const v = this.view; return [Math.round((wx - v.sx0) * v.s), Math.round((wy - v.sy0) * v.s)]; }
-    fontDev(size, minCss = 7) { return Math.round(Math.max(size * this.u, minCss * this.dpr)); }
+    fontDev(size, minCss = 7) { return Math.round(Math.max(size * this.u, minCss * this.dpr)*DISPLAY.textScale); }
     // On the cork board the paper is dimmed by the night overlay but this text layer is not, so dark ink is swapped for
     // light ink as the room darkens (this.inkMap: day colour → night colour, blended by this.inkK).
     ink(color) {
@@ -1070,11 +1328,11 @@
       const a = K.hexToRgb(color), b = K.hexToRgb(to);
       return K.rgbToHex(a[0] + (b[0] - a[0]) * this.inkK, a[1] + (b[1] - a[1]) * this.inkK, a[2] + (b[2] - a[2]) * this.inkK);
     }
-    textD(str, x, y, { color = '#fff', align = 'left', weight = 400, shadow = null, font = 12, alpha = 1 } = {}) {
+    textD(str, x, y, { color = '#fff', align = 'left', weight = 400, shadow = null, font = 12, alpha = 1, family = FONT } = {}) {
       const ctx = this.ctx;
       color = this.ink(color);
       ctx.globalAlpha = alpha;
-      ctx.font = `${weight} ${font}px ${FONT}`;
+      ctx.font = `${weight} ${font}px ${family}`;
       ctx.textAlign = align;
       ctx.textBaseline = 'alphabetic';
       if (shadow) { ctx.fillStyle = shadow; ctx.fillText(str, x, y + Math.max(1, Math.round(this.u / 2))); }
@@ -1082,7 +1340,7 @@
       ctx.fillText(str, x, y);
       ctx.globalAlpha = 1;
     }
-    measureD(str, px, weight = 400) { this.ctx.font = `${weight} ${px}px ${FONT}`; return this.ctx.measureText(str).width; }
+    measureD(str, px, weight = 400, family = FONT) { this.ctx.font = `${weight} ${px}px ${family}`; return this.ctx.measureText(str).width; }
     rectD(x, y, w, h, c) { this.ctx.fillStyle = c; this.ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); }
     boxD(x, y, w, h, fill, edge, shade) {
       const u = this.u;
@@ -1093,13 +1351,13 @@
       if (shade) this.rectD(x + u, y + h - 2 * u, w - 2 * u, u, shade);
     }
     inView(x, y, m = 60) { return x > -m && y > -m && x < this.canvas.width + m && y < this.canvas.height + m; }
-    wrapD(text, fs, maxPx) {
+    wrapD(text, fs, maxPx, family = FONT) {
       const words = String(text).split(/\s+/);
       const lines = [];
       let cur = '';
       for (const w of words) {
         const next = cur ? `${cur} ${w}` : w;
-        if (cur && this.measureD(next, fs) > maxPx) { lines.push(cur); cur = w; } else cur = next;
+        if (cur && this.measureD(next, fs, 400, family) > maxPx) { lines.push(cur); cur = w; } else cur = next;
       }
       if (cur) lines.push(cur);
       return lines.slice(0, 5);
@@ -1110,23 +1368,70 @@
       const s = this.view.s;
       const px = (world, minCss) => Math.round(Math.max(world * s, minCss * this.dpr));
       const [x0, y0] = this.scr(LED.x, LED.y);
-      if (!this.inView(x0, y0, 700)) return;
+      if (x0 + LED.w * s < 0 || y0 + LED.h * s < 0 || x0 > this.canvas.width || y0 > this.canvas.height) return;
       const articles = this.news.articles;
       const pad = Math.round(8 * s);
-      if (!this.led.paused && !document.hidden && this.t - this.led.at > 8.5 && articles.length > 1) { this.led.at = this.t; this.led.index = (this.led.index + 1) % articles.length; this.led.flip = this.t; }
+      if (!this.led.paused && !document.hidden && this.t - this.led.at > 12 && articles.length > 1) { this.led.at = this.t; this.led.index = (this.led.index + 1) % articles.length; this.led.flip = this.t; }
       if (this.led.at === 0) this.led.at = this.t;
       const a = articles[this.led.index % Math.max(1, articles.length)];
-      const next = articles.length > 1 ? articles[(this.led.index + 1) % articles.length] : null;
       const fade = Math.min(1, (this.t - this.led.flip) / 0.5);
       const cat = a?.category;
       const head = a ? `● ${I.t('led.news')} ${this.led.index % articles.length + 1}/${articles.length}  ·  ${cat === 'ai' ? I.t('led.ai') : I.t(`topic.${cat ?? 'general'}`).toUpperCase()}` : `● ${I.t('led.todays')}`;
+      if(DISPLAY.external){this.drawLargeLed(a,head,x0,y0,LED.w*s,LED.h*s,fade);return;}
       this.textD(head, x0 + pad, y0 + Math.round(13 * s), { color: '#88d6bf', font: px(6.2, 8), weight: 600 });
-      const titleFs = px(9.6, 11.5);
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(x0 + pad, y0 + 19 * s, LED.w * s - 2 * pad, (LED.h - 24) * s); ctx.clip();
+      const titleFs = px(9.6, 11);
       const title = a ? I.title(a) : this.news.refreshing ? I.t('led.preparing') : this.news.error ? I.t('led.unreachable') : I.t('led.waiting');
-      const all = this.wrapD(title, titleFs, LED.w * s - 2 * pad);
-      all.slice(0, 3).forEach((ln, i, arr) => this.textD(i === 2 && all.length > 3 ? ln + '…' : ln, x0 + pad, y0 + Math.round(30 * s) + i * Math.round(titleFs * 1.28), { color: '#f4eddb', font: titleFs, alpha: fade }));
-      if (next) this.textD(`↓ ${I.title(next).slice(0, 90)}${I.title(next).length > 90 ? '…' : ''}`, x0 + pad, y0 + Math.round((LED.h - 17) * s), { color: '#9eafc2', font: px(5.8, 7.5) });
-      this.textD(this.weatherLine(), x0 + pad, y0 + Math.round((LED.h - 6) * s), { color: '#e0c292', font: px(5.8, 7.5) });
+      const width = LED.w * s - 2 * pad;
+      const drawLines = (lines, max, yy, font, step, color) => {
+        lines.slice(0, max).forEach((ln, i) => {
+          let value = ln;
+          if (i === max - 1 && lines.length > max) {
+            while (value && this.measureD(value + '…', font) > width) value = value.slice(0, -1);
+            value += '…';
+          }
+          this.textD(value, x0 + pad, yy + i * step, { color, font, alpha: fade });
+        });
+      };
+      const titles = this.wrapD(title, titleFs, width);
+      const titleStep = Math.round(titleFs * 1.18);
+      drawLines(titles, 2, y0 + 29 * s, titleFs, titleStep, '#e3dfd2');
+      if (a) {
+        const summary = I.explanation(a) || I.t('pop.pending');
+        // The prose summary shares the title fade and fills the remaining screen area.
+        const parts = [summary];
+        let fs = px(8.2, 9);
+        const top = y0 + 29 * s + Math.min(2, titles.length) * titleStep + 5 * s;
+        const bottom = y0 + (LED.h - 7) * s;
+        const wrap = () => parts.flatMap(part => this.wrapD(part, fs, width));
+        let lines = wrap();
+        while (fs > 5.5 * s && lines.length * fs * 1.16 > bottom - top + fs) { fs -= 0.5; lines = wrap(); }
+        const step = fs * 1.16;
+        const count = Math.max(1, Math.floor((bottom - top) / step) + 1);
+        drawLines(lines, count, top, fs, step, '#a9b7c3');
+      }
+      ctx.restore();
+    }
+
+    drawLargeLed(article,head,x,y,width,height,fade){
+      const d=this.dpr,compact=height/d<190,pad=(compact?12:18)*d,titleSize=(compact?32:36)*d,bodySize=28*d,headerSize=20*d;
+      const family='"Geist",system-ui,sans-serif',inner=width-2*pad,ctx=this.ctx;
+      ctx.save();ctx.beginPath();ctx.rect(x+pad,y+pad,inner,height-2*pad);ctx.clip();
+      if(!compact)this.textD(head,x+pad,y+pad+headerSize,{font:headerSize,color:'#a6dfcd',weight:600});
+      const title=article?I.title(article):this.news.refreshing?I.t('led.preparing'):this.news.error?I.t('led.unreachable'):I.t('led.waiting');
+      const titles=this.wrapD(title,titleSize,inner).slice(0,2),start=y+pad+(compact?0:headerSize+16*d)+titleSize,step=titleSize*1.16;
+      titles.forEach((line,i)=>this.textD(line,x+pad,start+i*step,{font:titleSize,color:'#f2eddf',weight:600,alpha:fade}));
+      if(article&&!compact){
+        const top=start+(titles.length-1)*step+20*d+bodySize,bottom=y+height-pad;
+        const count=Math.max(1,Math.floor((bottom-top)/(bodySize*1.3))+1);
+        const lines=this.wrapD(I.explanation(article)||I.t('pop.pending'),bodySize,inner,family);
+        // Page existing verified text at a readable size instead of shrinking it to fit.
+        const pages=Math.ceil(lines.length/count),page=Math.floor(Math.max(0,this.t-this.led.at)/(12/Math.max(1,pages)))%Math.max(1,pages);
+        lines.slice(page*count,(page+1)*count).forEach((line,i)=>this.textD(line,x+pad,top+i*bodySize*1.3,{font:bodySize,family,color:'#d7e0df',alpha:fade}));
+      }
+      ctx.restore();
     }
 
     // ---------- cork board: notes, pins and the agent who moves the pin ----------
@@ -1202,7 +1507,8 @@
       const us = NOTES.usage;
       this.paper(us.x, us.y, us.w, us.h, '#efe6cc', false);
       for (const [i, key] of ['claude', 'codex', 'antigravity'].entries()) this.usageLogo(key, us.x + 1 + i * 25, us.y);
-      // "Konum: açık/kapalı" label, bottom left
+      this.paper(NOTES.refresh.x, NOTES.refresh.y, NOTES.refresh.w, NOTES.refresh.h, this.boardRefreshing ? '#cdbf9f' : '#f4e6c8', false);
+      // Compact location label, bottom left
       this.paper(NOTES.loc.x, NOTES.loc.y, NOTES.loc.w, NOTES.loc.h, '#f0e6c8', false);
       for (const [which, base, pinCol] of [['weather', '#f6edd3', '#f2c14e'], ['city', '#e4efd6', '#4f8fe0']]) {
         const st = this.cardAnim(which);
@@ -1236,13 +1542,28 @@
       }
     }
     pinner() {
-      const free = this.agents.filter((A) => !this.isAway(A.id) && !this.pinned.has(A.id) && this.st[A.id]?.status === 'idle' && !this.talkedTo(A.id));
+      const free = this.agents.filter((A) => A.id !== this.newsDelivery?.id && !this.kitchen?.reserved(A.id) && !this.isAway(A.id) && !this.pinned.has(A.id) && this.st[A.id]?.status === 'idle' && !this.talkedTo(A.id));
       return free[Math.floor(Math.random() * free.length)] ?? null;
     }
     // an agent walks to the board and moves the pin; without a free agent the pin simply jumps
+    setDisplayMode(on){DISPLAY.setEnabled(on);}
+    applyBoardAction(kind,to){
+      if(kind==='cli')this.cli=to;
+      else if(kind==='lang')I.set(to);
+      else if(kind==='loc')this.locOn=to;
+      else if(kind==='display')this.setDisplayMode(to); // Restore a legacy in-flight trip without exposing a board control.
+      else if(kind==='refresh'){this.fx.boardTap={t0:this.t,note:'refresh'};this.handlers.onBoardRefresh?.();}
+      else if(kind==='usage'){this.fx.boardTap={t0:this.t,note:'usage',provider:to};this.handlers.onUsage?.(to);}
+    }
+    drawBoardTapGlow(){
+      const tap=this.fx.boardTap;if(!tap)return;const pulse=Math.max(0,1-(this.t-tap.t0)/2);if(!pulse)return;
+      const n=NOTES[tap.note];if(!n)return;const x=tap.note==='usage'?n.x+['claude','codex','antigravity'].indexOf(tap.provider)*25+12:n.x+n.w/2;
+      this.b.save();this.b.globalCompositeOperation='lighter';this.glow(x,n.y+n.h/2,10+pulse*8,'#7ce3b8',pulse*.9);this.b.restore();
+    }
     movePin(kind, to) {
-      const apply = () => { if (kind === 'cli') this.cli = to; else if (kind === 'lang') I.set(to); else this.locOn = to; };
+      const apply=()=>this.applyBoardAction(kind,to);
       if (this.pinAnim) { apply(); return; }
+      if(window.OfficeCat.tryControl(this,{kind,to}))return;
       const agent = this.pinner();
       if (!agent) { apply(); return; }
       let anim, spot;
@@ -1252,6 +1573,8 @@
         const f = PINS[this.cli], t = PINS[to];
         const segs = [{ p0: f, p1: up(f), dur: 0.5 }, { p0: up(f), p1: up(t), dur: 0.9, arc: 8 }, { p0: up(t), p1: t, dur: 0.3 }];
         anim = { kind, to, segs, color: '#e2445c', total: segs.reduce((n, g) => n + g.dur, 0) };
+      } else if(['display','refresh','usage'].includes(kind)){
+        const n=NOTES[kind==='display'?'loc':kind],dx=kind==='usage'?Math.max(0,['claude','codex','antigravity'].indexOf(to))*25+12:n.w/2;spot={x:n.x+dx,y:WALK_Y+8};anim={kind,to,segs:[],total:1.8,switchAt:.9,switched:false};
       } else if (kind === 'lang') {
         spot = { x: NOTES.langTr.x + 15, y: WALK_Y + 8 }; // under the TR | EN tags: flip them, the language changes mid-flip
         anim = { kind, to, segs: [], color: '#000', total: 2.0, switchAt: 1.0, switched: false };
@@ -1279,7 +1602,8 @@
     drawBoardTextInner() {
       const s = this.view.s;
       const [bx, by] = this.scr(BOARD.x, BOARD.y);
-      if (!this.inView(bx, by, 500)) return;
+      // The board origin can be off-screen while its usage strip remains visible at high zoom.
+      if (bx + BOARD.w * s < 0 || by + BOARD.h * s < 0 || bx > this.canvas.width || by > this.canvas.height) return;
       const px = (world, minCss) => Math.round(Math.max(world * s, minCss * this.dpr));
       const at = (n, dx, dy) => this.scr(n.x + dx, n.y + dy);
       const [tx, ty] = this.scr(TITLE.x + 5, TITLE.y + TITLE.h - 4);
@@ -1301,7 +1625,7 @@
         const pct = entry ? entry.percent : null;
         const color = pct === null ? '#8a8272' : pct >= 90 ? '#a23a2a' : pct >= 70 ? '#9a6a14' : '#1f5a3a';
         const [ux, uy] = this.scr(us.x + 13 + i * 25, us.y + 8.5);
-        this.textD(pct === null ? '—' : `${pct}%`, ux, uy, { color, weight: 600, font: usageFs, alpha: stale ? 0.55 : 1 });
+        this.textD(pct === null ? '—' : `${pct}%`, ux, uy, { color, weight: 600, font: usageFs, family: 'ui-monospace, Menlo, Consolas, monospace', alpha: stale ? 0.55 : 1 });
       }
       // language switch (TR | EN), between the location label and the usage strip
       for (const [key, label] of [['tr', 'TR'], ['en', 'EN']]) {
@@ -1310,6 +1634,8 @@
         const on = I.lang === key;
         this.textD(label, gx, gy, { color: on ? '#2a2036' : '#8a8272', weight: on ? 600 : 400, font: px(5.4, 8), align: 'center' });
       }
+      const [rx, ry] = at(NOTES.refresh, NOTES.refresh.w / 2, 8);
+      this.textD(this.boardRefreshing ? '…' : '↻', rx, ry, { color: '#2a2036', font: px(7, 10), align: 'center' });
       // location label (centered): an agent wipes the old word and writes the new one
       const ln = NOTES.loc;
       const [lcx, ly] = at(ln, ln.w / 2, 8);
@@ -1372,9 +1698,24 @@
       const ms = this.fontDev(5, 7.5);
       const label = I.short(A);
       const tw = this.measureD(label, fs, 600);
-      const tagText = I.t(st.tag);
-      const mw = Math.round(this.measureD(tagText, ms, 600) + 3 * u);
+      const newsState = this.newsSession;
+      const state = this.newsDelivery ? 'delivering' : newsState?.reason === 'unavailable' ? 'unavailable' : newsState?.status === 'idle' && newsState.appliedAt ? 'published' : newsState?.status ?? 'idle';
+      const tagText = A.kind === 'news' && newsState
+        ? `${I.t(`desk.status.${state}`)} · ${newsState.progress?.percent ?? 0}%` : I.t(st.tag);
+      const tagFamily = A.kind === 'news' ? 'ui-monospace, Menlo, Consolas, monospace' : FONT;
+      const mw = Math.round(this.measureD(tagText, ms, 600, tagFamily) + 3 * u);
       const lh = Math.round(fs + 3 * u);
+      if(DISPLAY.external){
+        const nameSize=Math.max(fs,24*this.dpr),stateSize=Math.max(ms,20*this.dpr),padding=6*this.dpr;
+        const nameWidth=this.measureD(label,nameSize,600),stateWidth=this.measureD(tagText,stateSize,600,tagFamily);
+        const width=Math.max(nameWidth,stateWidth)+2*padding,height=nameSize+stateSize+3*padding;
+        const left=Math.max(padding,Math.min(this.canvas.width-width-padding,cx-width/2));
+        this.boxD(left,top,width,height,'#171b27',this.selected===A.id?'#d7d3a2':'#384455','#10131e');
+        this.textD(label,left+width/2,top+padding+nameSize,{font:nameSize,weight:600,color:'#f2eee3',align:'center'});
+        const color=st.status==='error'?'#ffb7bb':st.status==='typing'||st.status==='thinking'?'#b5e5c6':'#b9d2e3';
+        this.textD(tagText,left+width/2,top+2*padding+nameSize+stateSize,{font:stateSize,weight:600,family:tagFamily,color,align:'center'});
+        return;
+      }
       const total = Math.round(tw + mw + 7 * u);
       const x0 = Math.round(cx - total / 2);
       const selected = this.selected === A.id;
@@ -1385,16 +1726,16 @@
       const col = st.status === 'typing' || st.status === 'thinking' ? '#3ccf8e' : st.status === 'error' ? '#ff6b84' : A.accent;
       this.rectD(mx, top + 1.5 * u, mw, lh - 3 * u, col);
       this.rectD(mx, top + 1.5 * u, mw, u, K.tone(col, 0.4));
-      this.textD(tagText, mx + mw / 2, top + lh - 2.4 * u, { color: '#130f1c', weight: 600, align: 'center', font: ms });
+      this.textD(tagText, mx + mw / 2, top + lh - 2.4 * u, { color: '#130f1c', weight: 600, align: 'center', font: ms, family: tagFamily });
     }
 
     // Speech bubbles: wrapped, stacked so none covers another, clickable
     drawBubbles() {
       this.bubbleHits = [];
       const u = this.u;
-      const fs = this.fontDev(8.4, 12);
-      const lineH = Math.round(fs * 1.22);
-      const maxPx = Math.round(this.compact ? 190 * this.dpr * 0.7 : 280 * this.dpr);
+      const fs = DISPLAY.external?Math.max(32*this.dpr,this.fontDev(8.4,12)):this.fontDev(8.4,12);
+      const lineH = Math.round(fs * (DISPLAY.external?1.3:1.22));
+      const maxPx = DISPLAY.external?Math.min(this.canvas.width*.8,720*this.dpr):Math.round(this.compact ? 190 * this.dpr * 0.7 : 280 * this.dpr);
       const items = [];
       for (const bub of this.bubbles) {
         let wx, wy;
@@ -1421,6 +1762,7 @@
           if (!hit) break;
           by = hit.y - it.h - u;
         }
+        if(DISPLAY.external)by=Math.max(2*u,by);
         it.x = bx; it.y = by;
         placed.push({ x: bx, y: by, w: it.w, h: it.h });
       }
@@ -1465,7 +1807,11 @@
         if (q.x >= A.x - 4 && q.x <= A.x + w && q.y >= A.y - 12 && q.y <= A.y + h + 14) return { id: A.id, part: 'agent' };
       }
       const c = this.cat;
-      if (wx >= c.x + 9 - 11 * S && wx <= c.x + 9 + 11 * S && wy >= c.y + 10 - 16 * S && wy <= c.y + 10 + 2 * S) return { id: 'cat', part: 'prop' };
+      if (wx >= c.x + 9 - 14 * CAT_SCALE && wx <= c.x + 9 + 14 * CAT_SCALE && wy >= c.y + 10 - 24 * CAT_SCALE - (c.lift ?? 0) && wy <= c.y + 10 + 2 * CAT_SCALE - (c.lift ?? 0)) return { id: 'cat', part: 'prop' };
+      for (let i = 1; i < L.FLOOR_CABLE.length; i++) {
+        const [ax, ay] = L.FLOOR_CABLE[i - 1], [bx, by] = L.FLOOR_CABLE[i];
+        if (wx >= Math.min(ax, bx) - 3 && wx <= Math.max(ax, bx) + 3 && wy >= Math.min(ay, by) - 3 && wy <= Math.max(ay, by) + 3) return { id: 'floor-cable', part: 'prop' };
+      }
       for (const [id, x, y, w, h] of PROPS) if (wx >= x && wx <= x + w && wy >= y && wy <= y + h) return { id, part: 'prop' };
       return null;
     }
@@ -1473,7 +1819,11 @@
       const hit = this.pick(e.clientX, e.clientY);
       if (hit?.part === 'bubble') { if (hit.bub.act && this.handlers.onAct) this.handlers.onAct(hit.bub.act); else if (hit.bub.onClick) hit.bub.onClick(hit.bub); return; }
       if (hit?.part === 'prop') {
-        if (hit.id === 'cat') this.poke();
+        if (hit.id === 'floor-display') this.handlers.onFloorScreen?.();
+        else if (hit.id === 'floor-cable') this.handlers.onFloorCable?.();
+        else if (hit.id === 'board-refresh') this.movePin('refresh',true);
+        else if (hit.id.startsWith('usage-')) this.movePin('usage',hit.id.slice(6));
+        else if (hit.id === 'cat') this.poke();
         else if (hit.id === 'cli-claude' || hit.id === 'cli-codex') {
           const key = hit.id.slice(4);
           if (key !== this.cli || this.pinAnim) { const ok = this.handlers.onCli ? this.handlers.onCli(key) : true; if (ok !== false) this.movePin('cli', key); }

@@ -210,14 +210,15 @@
   }
 
   // Önden görünüm. pose: stand | mug | wave | cheer | walk ; f: kare
-  function front(look, pose = 'stand', f = 0) {
+  function front(look, pose = 'stand', f = 0, freeLeft = false) {
     const c = palette(look);
     return selout(make(CW, CH, (p) => {
       const P = (x, y, w, h, col) => p(x + OX, y + OY, w, h, col);
       const step = pose === 'walk' ? [0, 1, 0, -1][f % 4] : 0;
       // bacaklar
-      const lL = step > 0 ? 3 : 4;
-      const rL = step < 0 ? 3 : 4;
+      const seated = pose === 'lounge-stretch' || pose === 'lounge' || pose === 'lounge-talk' || pose === 'pet-seat';
+      const lL = seated ? 2 : step > 0 ? 3 : 4;
+      const rL = seated ? 2 : step < 0 ? 3 : 4;
       P(2, 17, 3, lL, c.pants); P(4, 17, 1, lL, c.pantsD);
       P(7, 17, 3, rL, c.pants); P(9, 17, 1, rL, c.pantsD);
       P(1, 17 + lL, 4, 2, c.shoe); P(2, 17 + lL, 1, 1, c.shoeL);
@@ -232,9 +233,18 @@
       if (look.hoodie) { P(2, 8, 8, 2, c.shirtD); P(4, 10, 1, 3, '#f4efe6'); P(7, 10, 1, 3, '#dcd4c8'); P(4, 13, 4, 2, c.shirtD); }
       // kollar
       const sw = pose === 'walk' ? [0, 1, 0, -1][f % 4] : 0;
-      const leftArm = () => { P(0, 10 + sw, 2, 5, c.shirt); P(0, 10 + sw, 1, 5, c.shirtL); P(0, 15 + sw, 2, 2, c.skin); };
+      const leftArm = () => { if (freeLeft) return; P(0, 10 + sw, 2, 5, c.shirt); P(0, 10 + sw, 1, 5, c.shirtL); P(0, 15 + sw, 2, 2, c.skin); };
       const rightArm = () => { P(10, 10 - sw, 2, 5, c.shirtD); P(10, 15 - sw, 2, 2, c.skinD); };
-      if (pose === 'wave') {
+      if(pose==='lounge-stretch'){
+        // A normal-length, bent-arm stretch while remaining seated.
+        P(0,6,2,6,c.shirt);P(0,4,2,2,c.skin);
+        P(10,6,2,6,c.shirtD);P(10,4,2,2,c.skinD);
+      } else if(seated){
+        // Bounded bent arms resting on knees; petting moves the wrist one pixel, never stretches.
+        P(0,10,2,4,c.shirt);P(0,13,3,2,c.shirt);
+        P(pose==='pet-seat'?-1:2,15+(pose==='pet-seat'?f%2:0),2,2,c.skin);
+        P(10,10,2,4,c.shirtD);P(8,13,4,2,c.shirtD);P(7,15,2,2,c.skinD);
+      } else if (pose === 'wave') {
         leftArm();
         P(10, 4, 2, 6, c.shirtD); P(10, 9, 1, 1, c.shirtD);
         P(10 + (f % 2), 2, 2, 2, c.skinD); P(11 + (f % 2), 1, 1, 1, c.skin);
@@ -267,14 +277,30 @@
         P(4, 4, 1, 1, '#4a3b5c');
       }
       P(3, 6, 1, 1, c.blush); P(8, 6, 1, 1, c.blush);
-      const happy = pose === 'wave' || pose === 'cheer';
+      const happy = pose === 'wave' || pose === 'cheer' || pose === 'lounge-talk' && f%2===0;
       if (happy) { P(5, 6, 2, 1, '#8a3040'); P(5, 7, 2, 0, c.mouth); } else P(5, 6, 2, 1, c.mouth);
       hairFront(P, c, look.hairStyle);
     }));
   }
 
+  // Hand-painted drink poses share the character's pixel grid and sleeve proportions.
+  const DRINK_GRIPS={carry:{x:-3,y:4},reach:{x:-4,y:2},sip:{x:-2,y:-3},wash0:{x:-4,y:2},wash1:{x:-4,y:3}};
+  function drinkArm(look,pose='carry'){
+    const c=palette(look),grip=DRINK_GRIPS[pose]??DRINK_GRIPS.carry;
+    return selout(make(16,16,p=>{
+      const P=(x,y,w,h,color)=>p(x+8,y+5,w,h,color);
+      if(pose==='sip'){
+        P(-1,-2,2,6,c.shirt);P(-1,-2,1,5,c.shirtL);
+        P(-2,-3,2,2,c.skin);P(-2,-4,2,1,c.skinL);
+      }else{
+        P(-1,0,2,5,c.shirt);P(-1,0,1,4,c.shirtL);P(0,4,1,1,c.shirtD);
+        P(grip.x,grip.y,4,2,c.skin);P(grip.x,grip.y+1,4,1,c.skinD);
+      }
+    }));
+  }
+
   // Arkadan oturan görünüm (masada çalışırken). f: daktilo karesi
-  function back(look, f = 0) {
+  function back(look, f = 0, freeLeft = false) {
     const c = palette(look);
     return selout(make(CW, CH, (p) => {
       const P = (x, y, w, h, col) => p(x + OX, y + OY, w, h, col);
@@ -285,7 +311,7 @@
       P(1, 9, 1, 4, c.shirtL);
       if (look.hoodie) { P(2, 8, 8, 3, c.shirtD); P(3, 8, 6, 1, c.shirt); }
       // dirsekler (yazarken oynar)
-      P(0, 10 - (f % 2), 1, 5, c.shirt);
+      if (!freeLeft) P(0, 10 - (f % 2), 1, 5, c.shirt);
       P(11, 10 - ((f + 1) % 2), 1, 5, c.shirtD);
       // boyun, kulaklar
       P(4, 8, 4, 1, c.skinD);
@@ -293,6 +319,28 @@
       P(10, 3, 1, 2, c.skinD);
       hairBack(P, c, look.hairStyle);
     }));
+  }
+
+  // Seated workflow poses: browsing, comparing, and preparing documents.
+  function work(look, phase, variant, f) {
+    const c = palette(look), canvas = make(CW, CH, () => {}), g = canvas.getContext('2d');
+    g.drawImage(back(look, 0), 0, 0);
+    const P = (x, y, w, h, color) => { g.fillStyle = color; g.fillRect(x + OX, y + OY, w, h); };
+    const beat = f % 4;
+    if (phase === 'search') {
+      if (variant === 0) { P(10,10,4,2,c.shirtD);P(13,9+beat%2,2,2,c.skin); }
+      if (variant === 1) { P(11,7,2,5,c.shirtD);P(12,5+beat%2,2,2,c.skin); }
+      if (variant === 2) { P(-2,10,3,3,c.shirt);P(-3,8+beat%2,5,3,'#eee5ce');P(-3,11+beat%2,2,1,c.skin); }
+    } else if (phase === 'evaluate') {
+      if (variant === 0) { P(-3,9,4,3,'#ece5d5');P(11,8+beat%2,4,3,'#d5e6e9');P(-2,12,2,1,c.skin);P(12,11+beat%2,2,1,c.skinD); }
+      if (variant === 1) { P(10,5,2,6,c.shirtD);P(9,4+beat%2,3,2,c.skinD); }
+      if (variant === 2) { P(11,8+beat%2,3,4,c.shirtD);P(12,7+beat%2,3,2,c.skin);P(13,5+beat%2,3,2,'#9c6756'); }
+    } else {
+      if (variant === 0) { P(-2,10,3,4,c.shirt);P(-3+beat%2,8,2,3,c.skin);P(-3+beat%2,6,1,4,'#e1b959'); }
+      if (variant === 1) { P(-3,8,4,5,'#ede8db');P(11,9,4,2,c.shirtD);P(13,8+beat%2,2,2,c.skinD); }
+      if (variant === 2) { P(-2,9,3,4,c.shirt);P(11,9,3,4,c.shirtD);P(-2,8+beat%2,16,3,'#d2a568');P(0,10+beat%2,2,1,c.skin);P(11,10+beat%2,2,1,c.skinD); }
+    }
+    return canvas;
   }
 
   // Ofis sandalyesi (arkadan)
@@ -393,47 +441,117 @@
     }));
   }
 
-  // Uyuyan kedi (2 kare: kuyruk)
-  function cat(f) {
-    return selout(make(18, 10, (P) => {
-      const o = '#f0a050';
-      const d = '#c97a32';
-      P(3, 3, 10, 5, o); P(4, 2, 8, 1, o); P(3, 3, 10, 1, '#ffc27a');
-      P(5, 4, 1, 3, d); P(8, 4, 1, 3, d); P(11, 4, 1, 3, d);
-      P(11, 2, 5, 5, o); P(11, 1, 1, 2, o); P(15, 1, 1, 2, o); P(12, 4, 1, 1, '#4a3040'); P(14, 4, 1, 1, '#4a3040'); P(13, 5, 1, 1, '#e88a8a');
-      P(3, 7, 10, 1, d);
-      if (f) { P(0, 4, 3, 1, o); P(0, 3, 1, 1, o); } else { P(0, 6, 3, 1, o); P(0, 7, 1, 1, o); }
-    }));
-  }
+  // Leya: a graceful, slightly plump silver-blue cat. Round cheeks, short muzzle, small ears and a softly rounded belly. Her RIGHT eye is the clouded one
+  // (it is the left one as we see her: she always looks towards the viewer, so the same eye stays recognisable in every pose).
+  function catPose(mode, frame = 0, face = 1) {
+    const f = frame % 8, beat = f % 4, blink = f === 7 && ['sit','look','pet','rub'].includes(mode);
+    return selout(make(26, 24, raw => {
+      const coat = '#8b98a4', shade = '#66737f', silver = '#a7b1ba', cream = '#9ba7b3', belly = cream, ear = '#939eaa';
+      // Every silhouette stroke has its own colour; never inherit a previous nose/eye fill.
+      const P = (x, y, w, h, color = coat) => raw(x, y, w, h, color);
 
-  // Oturan kedi (uyanınca) — f: miyav ağzı
-  function catSit(f) {
-    return selout(make(14, 14, (P) => {
-      const o = '#f0a050';
-      const d = '#c97a32';
-      const l = '#ffc27a';
-      P(3, 6, 7, 6, o); P(3, 6, 2, 6, l); P(8, 7, 2, 5, d); P(4, 11, 6, 1, d);
-      P(4, 1, 7, 5, o); P(4, 0, 2, 2, o); P(9, 0, 2, 2, o); P(5, 0, 1, 1, '#ff9aa0'); P(10, 0, 1, 1, '#ff9aa0');
-      P(5, 1, 3, 1, l);
-      P(6, 3, 1, 1, '#3a2a40'); P(9, 3, 1, 1, '#3a2a40');
-      if (f) { P(7, 4, 2, 2, '#8a3040'); } else P(7, 4, 2, 1, '#e88a8a');
-      P(1, 9, 2, 1, o); P(0, 7, 1, 2, o); P(0, 6, 1, 1, l);
-      P(4, 12, 2, 1, l); P(8, 12, 2, 1, l);
+      const head = (x, y, expression = '') => {
+        // face: wide cheeks tapering to a small muzzle (a cat, not a mouse)
+        P(x + 2, y, 8, 1); P(x + 1, y + 1, 10, 1); P(x, y + 2, 12, 4); P(x + 1, y + 6, 10, 1); P(x + 2, y + 7, 8, 1); P(x + 3, y + 8, 6, 1);
+        // Small triangular ears sit wide apart on a round feline face.
+        const twitch = f === 3 && ['sit', 'look', 'rub', 'knead'].includes(mode) ? 1 : 0;
+        P(x + 1, y - 2 + twitch, 1, 1, coat); P(x, y - 1, 3, 3, coat);
+        P(x + 10, y - 2, 1, 1, coat); P(x + 9, y - 1, 3, 3, coat);
+        P(x + 1, y - 1 + twitch, 1, 1, ear); P(x + 10, y - 1, 1, 1, ear);
+        P(x + 4, y + 1, 4, 1, silver);                      // forehead blaze
+        P(x + 1, y + 5, 3, 2, silver); P(x + 8, y + 5, 3, 2, silver); P(x + 4, y + 5, 4, 2, cream); // cheek fluff and muzzle
+        if (expression === 'closed' || blink) {
+          P(x + 2, y + 3, 3, 1, shade); P(x + 7, y + 3, 3, 1, shade);
+        } else {
+          // almond eyes: her right eye (left as we see her) is clouded, the other muted amber; vertical slit pupil
+          P(x + 2, y + 3, 3, 2, '#c6ced3'); P(x + 3, y + 3, 1, 2, '#acb9c2'); P(x + 2, y + 3, 1, 1, '#dce1e5');
+          P(x + 7, y + 3, 3, 2, '#b3a178'); P(x + 8, y + 3, 1, 2, '#454740'); P(x + 7, y + 3, 1, 1, '#c3baa3');
+          P(x + 1, y + 2, 1, 1, shade); P(x + 10, y + 2, 1, 1, shade); // slanted brow corners
+        }
+        P(x + 5, y + 5, 2, 1, '#a795a3');                  // small nose
+        if (expression === 'yawn') { P(x + 4, y + 6, 4, 3, '#4a3040'); P(x + 5, y + 8, 2, 1, '#d98fa0'); }
+        else { P(x + 5, y + 6, 1, 1, shade); P(x + 6, y + 6, 1, 1, shade); }
+        P(x - 1, y + 5, 2, 1, '#b9c6d3'); P(x + 11, y + 5, 2, 1, '#b9c6d3'); // whiskers
+      };
+      const tail = (high = false) => {
+        const x = face < 0 ? 22 : 2;
+        const sway = beat < 2 ? 0 : 1;
+        if (high) {
+          P(x, 12, 2, 8, shade); P(x - 1, 9, 2, 5, coat);
+          P(x + sway, 7, 2, 3, coat); P(x + 1 + sway, 7, 1, 1, silver);
+        } else {
+          P(x - 1, 20, 7, 2, shade); P(x - 1, 18, 2, 3, coat);
+          P(x - 2, 16, 2, 3, coat); P(x - 1 + sway, 15, 2, 2, silver);
+        }
+      };
+      const plumpBody = (x, y, w, h) => {
+        P(x + 3, y, w - 6, 1, coat); P(x + 1, y + 1, w - 2, 2, coat);
+        P(x, y + 3, w, Math.max(1, h - 5), coat);
+        P(x + 1, y + h - 2, w - 2, 1, coat); P(x + 3, y + h - 1, w - 6, 1, coat);
+      };
+      if (mode === 'watch') {
+        tail(false); plumpBody(6, 12, 15, 10);
+        P(8, 15, 2, 5, silver); P(17, 15, 2, 5, shade);
+        P(8, 6, 12, 5, coat); P(9, 4, 10, 8, coat);
+        P(9, 2, 2, 4, coat); P(17, 2, 2, 4, coat);
+        P(10, 5, 7, 1, silver); P(10, 10, 8, 1, shade);
+        P(8, 21, 4, 1, silver); P(15, 21, 4, 1, silver); return;
+      }
+      if (mode === 'jump') {
+        tail(true); plumpBody(5, 10, 16, 8);
+        P(7, 10, 10, 1, silver); P(6, 16, 3, 4, shade);
+        P(8, 19, 4, 2, coat); P(18, 16, 3, 4, cream);
+        P(20, 19, 4, 1, silver); head(face < 0 ? 0 : 13, 7); return;
+      }
+      if (mode === 'sleep') {
+        // curled up on her side: a round body, her head resting on the front paws at the right, tail wrapped along the front
+        const breathe = f >= 4 ? 1 : 0;
+        plumpBody(2, 12 - breathe, 17, 9 + breathe, coat); P(4, 12 - breathe, 9, 1, silver); P(4, 15, 3, 2, belly);
+        P(5, 14, 6, 5, shade); P(6, 14, 3, 1, coat);                                  // hind leg tucked in
+        P(0, 16, 3, 5, shade); P(0, 20, 16, 2, shade); P(1, 14, 2, 3, coat);          // tail: up the back, then along the front
+        P(14, 20, 7, 2, coat); P(19, 21, 3, 1, silver);                               // paws under her chin
+        head(12, 8 - breathe, 'closed'); return;
+      }
+      if (mode === 'walk') {
+        const bob = beat % 2, step = [0,1,0,-1][beat];
+        tail(true); plumpBody(5, 11 - bob, 16, 9); P(7, 11 - bob, 11, 1, silver); P(8, 16 - bob, 9, 3, cream); P(9, 16 - bob, 3, 2, belly);
+        for (const [x, d] of [[7,step],[11,-step],[16,step],[19,-step]]) P(x + d, 19, 3, 3 - bob, x === 7 || x === 16 ? shade : silver);
+        head(face < 0 ? 0 : 13, 8 - bob); return;
+      }
+      if (mode === 'stretch' || mode === 'crouch' || mode === 'play') {
+        const stretch = mode === 'stretch', low = mode === 'crouch';
+        tail(stretch); plumpBody(5, stretch ? 10 : 13, 15, stretch ? 9 : 7); P(7, stretch ? 10 : 13, 8, 1, silver); P(5, 17, 4, 5, shade);
+        const paw = mode === 'play' ? beat % 2 * 3 : 0;
+        P(17, 19, 4 + paw, 3, silver); P(21, 21, 4, 1, cream);
+        head(12, low ? 12 : 13, low && beat % 2 ? 'closed' : ''); return;
+      }
+      if (mode === 'roll') {
+        plumpBody(5, 13, 17, 8); P(8, 14, 11, 6, cream); P(9, 15, 3, 2, belly); P(6, 20, 15, 1, shade);
+        for (let i = 0; i < 3; i++) P(9 + i * 4, 9 + (beat + i) % 2, 3, 5, i % 2 ? silver : coat);
+        P(22, 15, 2, 4, coat); P(23, 13 + beat % 2, 2, 3, silver);
+        head(0, 12 + beat % 2, beat < 2 ? 'closed' : ''); return;
+      }
+      // seated poses: a round, plump silhouette; paws, ears and posture carry the gesture
+      tail(false);
+      const sway = mode === 'rub' ? (beat < 2 ? -1 : 1) : 0;
+      plumpBody(5 + sway, 12, 16, 10); P(6 + sway, 12, 2, 8, silver); P(19 + sway, 13, 2, 8, shade);
+      P(9 + sway, 15, 8, 7, cream); P(10 + sway, 16, 3, 2, belly);
+      const knead = mode === 'knead' ? beat % 2 : 0;
+      P(8 + sway, 17, 3, 5 - knead, cream); P(14 + sway, 17, 3, 4 + knead, cream); P(7 + sway, 21 - knead, 5, 1, silver); P(13 + sway, 20 + knead, 5, 2, silver);
+      const wash = mode === 'groom', nod = wash ? 3 : mode === 'look' ? beat % 2 : 0;
+      head(7 + sway, 4 + nod, mode === 'yawn' ? (f > 1 && f < 6 ? 'yawn' : 'closed') : mode === 'pet' || wash ? 'closed' : '');
+      if (wash) {
+        const earWash = f >= 4;
+        P(earWash ? 18 : 10, earWash ? 8 : 13, 3, 5, cream);
+        if (!earWash && beat % 2) P(11, 13, 1, 2, '#c99caa');
+      }
+      if (mode === 'pet') P(18, 11, 2, 3, silver);
     }));
   }
-  // Yürüyen kedi (sağa bakar), f: 0..3
-  function catWalk(f) {
-    return selout(make(18, 11, (P) => {
-      const o = '#f0a050';
-      const d = '#c97a32';
-      const l = '#ffc27a';
-      P(3, 3, 10, 4, o); P(3, 3, 10, 1, l); P(6, 4, 1, 2, d); P(9, 4, 1, 2, d);
-      P(12, 1, 5, 4, o); P(12, 0, 1, 2, o); P(16, 0, 1, 2, o); P(14, 2, 1, 1, '#3a2a40'); P(16, 3, 1, 1, '#e88a8a');
-      const s = [0, 1, 0, -1][f % 4];
-      P(4 + s, 7, 1, 2, d); P(6 - s, 7, 1, 2, o); P(10 + s, 7, 1, 2, d); P(12 - s, 7, 1, 2, o);
-      P(0, 1 + (f % 2), 3, 1, o); P(0, 0 + (f % 2), 1, 1, o);
-    }));
-  }
+  function cat(f) { return catPose('sleep', f * 4); }
+  function catSit(f) { return catPose(f ? 'yawn' : 'sit', f); }
+  function catWalk(f) { return catPose('walk', f); }
+
   // Guguk kuşu
   function bird() {
     return selout(make(9, 7, (P) => {
@@ -443,5 +561,5 @@
   }
 
   window.PixelKit = {
-    catSit, catWalk, bird, tone, alpha, hexToRgb, rgbToHex, make, selout, rng, front, back, chair, desk, monitor, keyboard, ITEMS, bigPlant, cat, COURIER, OX, OY, CW, CH };
+    catPose, catSit, catWalk, bird, palette, tone, alpha, hexToRgb, rgbToHex, make, selout, rng, front, back, drinkArm, DRINK_GRIPS, work, chair, desk, monitor, keyboard, ITEMS, bigPlant, cat, COURIER, OX, OY, CW, CH };
 })();

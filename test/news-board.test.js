@@ -28,17 +28,56 @@ test('quota failure preserves published headlines, rejects unknown explanation I
   fail=false;await board.refresh(true);assert.equal(board.get().articles[0].explanation,null);
   now+=7*3600000;assert.equal(board.get().articles.length,0);
 });
-test('news editorial uses the same serialized queue and persistent daily cap as dialogues',async t=>{
+test('news editorial serializes calls and persists informational usage without daily caps',async t=>{
   const dir=temp(t);let active=0,max=0,calls=0;
   const dialogues=createDialogues({dataDir:dir,config:()=>({dialogues:{maxCallsPerDay:2}}),run:async()=>{active++;max=Math.max(max,active);calls++;await new Promise(r=>setTimeout(r,15));active--;return {articles:[]};}});
   await Promise.all([dialogues.editorial(call=>call('a','b',{})),dialogues.editorial(call=>call('a','b',{}))]);
   assert.equal(max,1);assert.equal(calls,2);assert.equal(dialogues.status().usage.calls,2);
-  await assert.rejects(dialogues.editorial(call=>call('a','b',{})),/daily-budget/);assert.equal(calls,2);
-  const restored=createDialogues({dataDir:dir,config:()=>({dialogues:{maxCallsPerDay:2}}),run:async()=>{throw new Error('must not run');}});
-  await assert.rejects(restored.editorial(call=>call('a','b',{})),/daily-budget/);
+  await dialogues.editorial(call=>call('a','b',{}));assert.equal(calls,3);
+  const restored=createDialogues({dataDir:dir,config:()=>({dialogues:{maxCallsPerDay:2}}),run:async()=>({articles:[]})});
+  assert.equal(restored.status().usage.calls,3);
+  await restored.editorial(call=>call('a','b',{}));
+  assert.equal(restored.status().usage.calls,4);
 });
 test('a failed preparation backs off instead of creating a GET/SSE refresh loop',async t=>{
   const dir=temp(t);let attempts=0;
   const board=createNewsBoard({dataDir:dir,collect:async()=>{throw new Error('must not reach');},editorial:async()=>{attempts++;throw new Error('daily-budget');}});
   await board.refresh();for(let i=0;i<10;i++)board.read();await new Promise(r=>setTimeout(r,0));assert.equal(attempts,1);assert.ok(board.get().error);
+});
+
+
+test('LED editorial constrains both languages and rejects overflow without replacing the live edition', async t => {
+  const dir = temp(t), now = Date.now();
+  let oversized = false, labeled = false;
+  const board = createNewsBoard({ dataDir: dir, now: () => now, hold: true,
+    collect: async () => ({ sources: [source(now)] }),
+    details: async articles => articles.map(a => ({ url: a.url, text: 'Input per million tokens: Haiku $0.10; Argon $2.00.' })),
+    editorial: async job => job(async (prompt, input, schema) => {
+      assert.match(prompt, /tek paragraf/u);
+      assert.match(prompt, /etiketleri.*KULLANMA/u);
+      assert.match(prompt, /sonuç uydurma/u);
+      assert.match(prompt, /hangi model en pahalı, hangi model en ucuz/u);
+      assert.match(prompt, /Genel bilgiden fiyat ya da model sıralaması tahmin etme/u);
+      assert.match(JSON.parse(input).articles[0].articleText, /Haiku \$0\.10/);
+      const fields = schema.properties.articles.items.properties;
+      for (const field of ['titleTr', 'titleEn']) assert.equal(fields[field].maxLength, 72);
+      for (const field of ['explanation', 'explanationEn']) assert.equal(fields[field].maxLength, 220);
+      return { articles: JSON.parse(input).articles.map(a => ({ articleId: a.articleId,
+        titleTr: 'Yeni ajan aracı', titleEn: oversized ? 'x'.repeat(73) : 'New agent tool',
+        explanation: labeled ? 'Problem: Access. Method: A tool. Result: Unreported.' : 'Yeni araç ajanların erişimini kolaylaştırıyor. Ölçülmüş test sonucu henüz paylaşılmadı.',
+        explanationEn: 'The new tool makes agent access easier. No measured benchmark result has been reported.',
+      })) };
+    }),
+  });
+  await board.refresh(true); assert.equal(board.hasStaged(), true); board.publish();
+  const published = board.get();
+  oversized = true;
+  await board.refresh(true);
+  assert.equal(board.hasStaged(), false);
+  assert.equal(board.failure().code, 'news-incomplete');
+  assert.deepEqual(board.get().articles, published.articles);
+  oversized = false; labeled = true;
+  await board.refresh(true);
+  assert.equal(board.hasStaged(), false, 'labeled model output is rejected');
+  assert.deepEqual(board.get().articles, published.articles);
 });
