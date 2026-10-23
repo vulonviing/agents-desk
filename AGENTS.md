@@ -193,7 +193,7 @@ dialogues written by Gemini Flash. Everything is deliberately minimal: more of t
 
 ## Workflow Logging
 
-Append every completed chat-session step to `ai_usage/steps_logs.md`.
+Append every completed chat-session step to `ai_usage/steps_logs.md`. The `ai_usage/` folder is git-ignored (local only, never committed).
 
 ```text
 ## Step <N> — YYYY-MM-DD HH:MM
@@ -211,7 +211,7 @@ Append every completed chat-session step to `ai_usage/steps_logs.md`.
 - Do not create micro-level README files by default. Keep docs current; mark superseded docs as archive.
 - `README.md` is the public overview (purpose, functions, animation tree, run); keep its animation tree and screenshots in step with behaviour changes.
   Screenshots live in `docs/img/`; take them with Playwright at 1600×900, use `window.OFFICE_HOUR` for day/night, keep the floor display off
-  and never show application data.
+  and never show application data. Use a non-personal location (Munich, mocked via `/api/weather` routing, never the owner's real one).
 - Skills/plugin routing lives in `PLUGINS.md`; this repo ships no skills of its own.
 
 ## Planning-Mode User Decisions (hard rule)

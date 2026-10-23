@@ -7,3 +7,4 @@ workspace/
 shot-*.png
 app/dist/
 .qa/
+ai_usage/

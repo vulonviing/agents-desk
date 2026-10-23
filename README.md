@@ -117,7 +117,17 @@ Everything runs from this repository. Other project folders are read-only inputs
 network or MCP access beyond the Desk-owned briefing MCP; secret files are never opened. Transcripts, prompts
 and credentials are never persisted. See `AGENTS.md` for the full list.
 
+## License
+
+Copyright (c) 2026 vulonviing. Released under the [PolyForm Noncommercial License 1.0.0](LICENSE): free to use,
+study, modify and share for any non-commercial purpose; commercial use is not permitted. The license covers this
+repository's own code only; the third-party material below keeps its own terms.
+
 ## Credits
 
-The scene, sprites and LED panel are adapted from the studio office of `muratceme/minik-ajanlar`. Germany
-boundaries are Natural Earth (public domain); city coordinates are GeoNames (CC BY).
+- The scene, sprites and LED panel are adapted from the studio office of `muratceme/minik-ajanlar`.
+- Germany boundaries: [Natural Earth](https://www.naturalearthdata.com/) (public domain).
+- City coordinates: [GeoNames](https://www.geonames.org/) (CC BY 4.0).
+- Weather: [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0, free non-commercial API); city names via BigDataCloud's free client-side reverse geocoding.
+- Fonts: Pixelify Sans and Geist (SIL Open Font License 1.1, loaded from Google Fonts); the single digit-five glyph is an original drawing.
+- News headlines are fetched at runtime from public feeds and are not redistributed in this repository.
