@@ -15,6 +15,7 @@ dialogues written by Gemini Flash. Everything is deliberately minimal: more of t
 
 ## Layout of the code
 
+- `README.md` — overview, animation tree, run instructions; `docs/img/` — screenshots.
 - `server/server.js` — HTTP + SSE; `server/chat.js`, `llm.js`, `claude.js`, `resume.js` — coordinator chat and CLI sessions.
 - `server/dialogues.js`, `dialogue-creator.js`, `antigravity.js`, `briefing*.js`, `news-*.js` — news, dialogue pools, Flash refills, LED board.
 - `office/public/js/i18n.js` (TR/EN), `screens.js` (monitor scenes: Excel, X, Instagram, VS Code, Claude, Codex, sports …),
@@ -126,7 +127,7 @@ dialogues written by Gemini Flash. Everything is deliberately minimal: more of t
 - Idle monitors draw independently randomized scenes, excluding the last three selections, with randomized starts and durations.
   Persist RNG state, history and scene phase in snapshots; pause the idle stream during actual work.
   Active CLI screens and the News Desk's real preparation-progress screen override entertainment.
-- Physical controls share one selection policy: choose Leya with 75% probability when eligible, otherwise a free sim. This covers floor-display ON/OFF, CLI/language/location cards, board refresh, and usage-logo taps. Refresh and usage actions fire on the actual paw tap or human contact and emit a brief green glow; never duplicate callbacks. Busy cats, open chats, and working coordinators retain their existing guards.
+- Physical controls share one selection policy: choose Leya with 75% probability when eligible, otherwise a free sim. This covers floor-display ON/OFF, CLI/language/location cards, board refresh, and usage-logo taps. Refresh and usage actions fire on the actual paw tap or human contact and emit a brief green glow; never duplicate callbacks. Busy cats and open or working *chats* retain their guards; News Desk preparation and Application Studio workflow scenes do not block Leya (`view.st[id].chatting`, set in `app.js` `applyStatuses`).
 - Leya handles user-requested power or board controls: a routed approach, pad jump or paw tap, and varied bilingual meows. No control trip begins during an open/working coordinator chat. The control descriptor survives refresh.
 - Objects attached to an actor share its depth order. Pressure pads are painted before actors; their transparent DOM hit targets never cover sprites.
 - Floor-display emission uses actual sprite-alpha occlusion; never dark rectangular cutouts around cats or walkers.
@@ -204,6 +205,10 @@ Append every completed chat-session step to `ai_usage/steps_logs.md`.
 ## Documentation Rules
 
 - Do not create micro-level README files by default. Keep docs current; mark superseded docs as archive.
+- `README.md` is the public overview (purpose, functions, animation tree, run); keep its animation tree and screenshots in step with behaviour changes.
+  Screenshots live in `docs/img/`; take them with Playwright at 1600×900, use `window.OFFICE_HOUR` for day/night, keep the floor display off
+  and never show application data.
+- Skills/plugin routing lives in `PLUGINS.md`; this repo ships no skills of its own.
 
 ## Planning-Mode User Decisions (hard rule)
 
