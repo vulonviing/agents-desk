@@ -149,8 +149,8 @@ final class MonitorApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     @objc func reloadOffice() { webReady = false; loading = true; web.reload(); tick() }
     @objc func quit() { saveScene(); window.orderOut(nil); NSApp.terminate(nil) }
     @objc func portChanged(_ note: Notification) {
-        guard let value=note.userInfo?["port"] as? Int, (1024...65535).contains(value) else { return }
-        if !enabled { settings["enabled"]=true; write(settings,"monitor-settings.json"); statusItem.menu?.item(at:0)?.state = .on }
+        // Only the port the Desk server wrote to its own runtime file is trusted; the notification alone is not.
+        guard let value=note.userInfo?["port"] as? Int, (1024...65535).contains(value), read("monitor-runtime.json")["port"] as? Int == value else { return }
         guard value != port else { reconcile(); return }
         port=value; online=false; window.orderOut(nil); frameSignature=""; tick()
     }
