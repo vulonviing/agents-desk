@@ -157,6 +157,19 @@ dialogues written by Gemini Flash. Everything is deliberately minimal: more of t
   (`life.onWalk`, `onSched`, `onAct`).
 - Run the server detached (`nohup node server/server.js &`) so closing the terminal does not end the office.
 
+## Shared scene across screens
+
+- Every browser and screen shows the same office. One visible page leads (the first to claim it, 4 s lease): it runs the
+  simulation and publishes its plain-data snapshot every 300 ms to `POST /api/scene/sync`. All other pages are followers: they restore
+  that snapshot and never decide anything (`view.follower` guards `life.tick`, `view.update`, and Leya's transitions).
+  Hidden pages only follow; a closing or hidden leader releases the lead at once (`/api/scene/release`).
+- `server/scene-share.js` keeps the snapshot in memory only (bounded to 400 KB), never on disk. Chat text, prompts and transcripts never pass through it.
+- Per screen, never shared: camera/zoom, display profile, chat panel, application filters, language and CLI choice. A follower's open chat is
+  reported as a pin so the leader keeps that colleague at the desk.
+- Follower clicks that start scene animations (props, Leya, floor-display ON/OFF) travel as plain-data commands to the leader
+  (`interact`, `poke`, `power`, `cancelPower`). Board controls (language, CLI, refresh) take effect on the follower's own screen at once; their pin animation plays only on the leader.
+- New behaviour that decides or randomizes must stay behind the follower guard; new state must be part of the snapshots.
+
 ## External monitor companion
 
 - User-authorized macOS display integration lives in `app/monitor/Monitor.swift`; build with `npm run monitor:build`.

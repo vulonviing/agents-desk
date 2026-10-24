@@ -200,6 +200,7 @@
     try { updateNewsSession(await getJson('/api/news/session')); } catch { /* reconnect later */ }
     setInterval(async () => { try { updateNewsSession(await getJson('/api/news/session')); } catch { /* offline */ } }, 30_000);
     life.start();
+    window.OfficeSceneSync.mount({ view, life, floorPowerOn: () => !!view.floorDisplayActive, applyFloorPower: on => Applications.applyPower(on) });
     for (const a of view.agents) void life.pools.ensure(life.deskOf(a));
   })();
 

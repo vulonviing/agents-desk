@@ -157,6 +157,7 @@
     }
     tick() {
       const v = this.view;
+      if (v.follower) return;
       if (this.fireplace?.tick()) return;
       this.startScreenPower();
       this.workflow.tick();

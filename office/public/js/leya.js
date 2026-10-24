@@ -95,6 +95,7 @@
       c.y = j.from.y + (j.to.y - j.from.y) * ease - 10;
       c.lift = Math.sin(k * Math.PI) * j.height;
       if (j.to.x !== j.from.x) c.face = j.to.x > j.from.x ? 1 : -1;
+      if (v.follower) return;
       if(c.control&&!c.control.done&&c.control.kind!=='power'&&k>=.5){c.control.done=true;v.handlers.onCatControl?.(c.control);meow(v,true);}
       if (k >= 1) {
         c.lift = 0; c.surface = j.surface; pose(v, j.after);
@@ -112,7 +113,7 @@
       }
       let distance = age * (c.mode === 'chase' ? 36 : c.mode === 'counter-walk' ? 10 : 22);
       if (distance >= c.len) {
-        const p = c.route[c.route.length - 1]; c.x = p.x - 9; c.y = p.y - 10; arrived(v); return;
+        const p = c.route[c.route.length - 1]; c.x = p.x - 9; c.y = p.y - 10; if (!v.follower) arrived(v); return;
       }
       for (let i = 1; i < c.route.length; i++) {
         const a = c.route[i - 1], b = c.route[i], len = Math.hypot(b.x - a.x, b.y - a.y);
@@ -121,6 +122,7 @@
       }
       return;
     }
+    if (v.follower) return; // followers mirror the leader's decisions; movement above is only interpolated
     if(c.hearth && ['sleep','knead','groom','pet','look'].includes(c.mode)){
       if(age >= (c.duration??8)) pose(v,choose(['sleep','sleep','knead','groom']),12+Math.random()*18);
       return;

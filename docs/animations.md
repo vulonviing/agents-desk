@@ -30,6 +30,13 @@ Time-driven state lives in plain data so a page refresh resumes it (`view.snapsh
 New choreography: add an `act.type`, route it in `life.onWalk` / `onSched` / `onAct` to your module, keep state in a
 `snapshot()`/`restore()` pair, and never capture closures in the descriptors.
 
+### Shared scene (leader / follower)
+
+`scene-sync.js` runs on every page. The leader publishes `view.snapshot()` (minus camera and display profile) and `life.snapshot()`
+(minus `spokenAt`) every 300 ms; followers restore them and set `view.follower = true`, which makes `life.tick`, the walk/schedule
+loop in `view.update`, and Leya's state transitions no-ops (she still interpolates along her route). Anything new that decides or
+randomizes must respect `view.follower`; anything new that must look the same everywhere must be in a snapshot.
+
 ## 2. Time and light (`office.js`)
 
 `view.darkness()` maps the clock (override with `window.OFFICE_HOUR`) to 0..0.56:
@@ -198,4 +205,5 @@ Triggered from `interact`, Leya and the kitchen; the audio context resumes if su
 4. Respect depth: draw attached objects inside the owning actor's entity entry.
 5. Light-emitting things draw again after the night overlay (see section 2).
 6. Add bilingual strings to `i18n.js`; add tests in `test/` for pure logic (timers, eligibility, snapshot round-trip).
-7. Verify with a Playwright screenshot at day (`OFFICE_HOUR = 12`) and night (`23`), and a refresh mid-animation.
+7. Guard decisions behind `view.follower` and keep side effects (network, sound, handlers) off followers.
+8. Verify with a Playwright screenshot at day (`OFFICE_HOUR = 12`) and night (`23`), and a refresh mid-animation.

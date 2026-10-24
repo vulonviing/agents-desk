@@ -44,6 +44,8 @@ chat front end in one:
 - **Usage.** Normalized Claude/Codex/Antigravity quota read read-only from the Agents Deck history store.
 - **Session continuity.** A page refresh resumes the office moment for moment (scene snapshot every 300 ms in
   `localStorage`, chat session ids in `data/chat-sessions.json`, never message text).
+- **One shared office.** Open it on several screens or browsers and they show the same moment: one page leads the simulation, the
+  others follow its snapshot (`server/scene-share.js`, `office/public/js/scene-sync.js`). Camera, language and chat panel stay per screen.
 - **External monitor companion.** A native macOS window (`app/monitor/Monitor.swift`) shows the same office on
   a selected external display only, never activating or stealing focus.
 

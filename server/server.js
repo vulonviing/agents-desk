@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { ROOT, loadConfig, loadDesks } from './config.js';
 import { buildCoordinators, FLOOR_ID, VARIANTS } from './desks.js';
 import { createChats } from './chat.js';
+import { createSceneShare } from './scene-share.js';
 import { createNewsFeedback } from './news-feedback.js';
 import { createNewsBoard } from './news-board.js';
 import { createDialogueCreator } from './dialogue-creator.js';
@@ -156,6 +157,7 @@ export function createDeskServer(deps = {}) {
     return { room: desk.kind === 'news' ? { ...desk, path: resolve(ROOT, desk.path ?? '.') } : desk, def: { kind: desk.kind === 'news' ? 'news' : 'project', key: 'project', name: desk.coordinator ?? desk.name, coordinator: true, lang } };
   };
 
+  const sceneShare = createSceneShare();
   const newsChatContexts = new Map(); // bounded public evidence in memory, never persisted
   async function handleApi(req, res, url) {
     const path = url.pathname;
@@ -222,6 +224,14 @@ export function createDeskServer(deps = {}) {
     if (method !== 'POST') return false;
     if (!originOk(req)) return fail(res, 403, 'forbidden origin');
 
+    if (path === '/api/scene/sync') {
+      const result = sceneShare.sync(await readJson(req, 512 * 1024));
+      return send(res, result.status ?? 200, result.error ? { error: result.error } : result);
+    }
+    if (path === '/api/scene/release') {
+      sceneShare.release((await readJson(req)).clientId);
+      return send(res, 200, { ok: true });
+    }
     if (path === '/api/applications/refresh') {
       const body = await readJson(req);
       return send(res, 200, await applicationBoard.read({fresh:true,provider:providerOf(body.provider)}));

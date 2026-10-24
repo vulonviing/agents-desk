@@ -17,6 +17,12 @@
   const FX_DUR = { plant0: 1.3, plant1: 1.3, plant2: 1.3, plant3: 1.3, plant4: 1.3, coffee: 2.6, cooler: 1.8, fridge: 4.5, clock: 2.0, books: 1.6, boardTap: 2, door: 3.0, window0: 3.2, window1: 3.2, window2: 3.2, window3: 3.2 };
   const WALK_SPEED = 62;
   const CAT_SCALE = DISPLAY.catScale; // Leya is smaller than the office characters.
+  // Desks held at their chair by an open chat: local pins plus those reported by other screens sharing this scene.
+  class PinSet extends Set {
+    remote = new Set();
+    has(id) { return super.has(id) || this.remote.has(id); }
+    get size() { return super.size + this.remote.size; }
+  }
   const R = 2; // the scene buffer has twice the world resolution so 150% sprites keep an even pixel grid
 
   function polyLen(pts) {
@@ -65,7 +71,8 @@
       this.walks = {};
       this.bubbles = [];
       this.bubbleHits = [];
-      this.pinned = new Set(); // agents that must stay at their desk (open chat)
+      this.pinned = new PinSet(); // agents that must stay at their desk (open chat)
+      this.follower = false; // a follower only displays the leader's shared snapshot and never decides anything
       this.selected = null;
       this.particles = [];
       this.fx = {};
@@ -340,6 +347,7 @@
       this.particles = this.particles.filter((p) => this.t - p.born < p.life);
       this.bubbles = this.bubbles.filter((b) => b.until > this.t);
       this.catUpdate();
+      if (this.follower) return;
       for (const [id, w] of Object.entries(this.walks)) {
         const c = w.cur;
         if (!c) continue;
