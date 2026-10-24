@@ -55,7 +55,7 @@
         if (leader && !document.hidden) body.snapshot = shared();
         const r = await post('/api/scene/sync', body);
         if (!r) return;
-        view.pinned.remote = new Set(r.pinned ?? []);
+        view.pinned.remote = new Set((r.pinned ?? []).filter(id => view.byId[id]).slice(0, 12)); // advisory: known colleagues only
         become(r.role);
         if (r.role === 'leader') for (const id of view.pinned.remote) view.release(id); // an open chat elsewhere calls that colleague back
         if (r.role === 'leader') for (const c of r.commands ?? []) run(c);
