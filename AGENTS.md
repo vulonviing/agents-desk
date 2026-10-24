@@ -197,6 +197,12 @@ dialogues written by Gemini Flash. Everything is deliberately minimal: more of t
 - Threat model: Desk only ever runs on the owner's own machine (loopback, single user). Findings that assume an outside attacker
   (for example prompt injection through news articles steering web fetches, or other local processes poking the monitor companion)
   are accepted risks by owner decision; do not re-raise or fix them unless the owner asks. Never expose the server beyond `127.0.0.1`.
+- Accepted findings (owner decision, 2026-10-24; revisit only if the server is ever reachable from outside this machine):
+  - News article text is placed in the news chat prompt as marked, untrusted data; the web-research exception could in theory be steered by an injected page.
+  - The monitor companion trusts only the port in `data/monitor-runtime.json`, but any local process can still announce that port.
+  - `/api/scene/sync` has no login: any local process can claim the lead, publish a scene, or queue the four fixed commands
+    (`interact`, `poke`, `power`, `cancelPower`). Client ids only separate leader from followers; they are not credentials.
+  - Fixed instead: remote pins accept only known colleagues (max 12).
 
 - Everything runs from this repo. Never edit, commit, or push in another repo under `~/Documents`; they are read-only inputs.
 - Nothing is written outside this repo. Chat sessions only read project folders.
